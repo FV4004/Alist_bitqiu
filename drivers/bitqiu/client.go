@@ -473,6 +473,9 @@ func clientObject(raw json.RawMessage, parentID, parentPath string, folder bool)
 		return nil, errors.New("BitQiu 文件元数据包含无效的文件名")
 	}
 	o := &Object{Object: model.Object{ID: id, Name: name, IsFolder: folder, Size: intField(m, "size", "fileSize", "file_size")}, ParentID: parentID}
+	if size, err := strconv.ParseInt(textField(m, "size", "fileSize", "file_size"), 10, 64); err == nil && size >= 0 {
+		o.SizeKnown = true
+	}
 	o.ClientIDSource = source
 	o.ClientIDChanged = id != textField(m, "resourceId", "resource_id", "fileId", "file_id", "dirId", "dir_id", "id")
 	o.ClientCursor = textField(m, "sort")

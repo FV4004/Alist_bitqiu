@@ -254,3 +254,19 @@ func (om *ObjMerge) InitHideReg(hides string) {
 func (om *ObjMerge) Reset() {
 	om.set.Clear()
 }
+
+// ObjectSizeKnown preserves the distinction between an empty file and missing
+// size metadata, including through the existing object wrappers.
+func ObjectSizeKnown(obj Obj) bool {
+	for {
+		wrapper, ok := obj.(ObjUnwrap)
+		if !ok {
+			break
+		}
+		obj = wrapper.Unwrap()
+	}
+	if known, ok := obj.(interface{ IsSizeKnown() bool }); ok {
+		return known.IsSizeKnown()
+	}
+	return !obj.IsDir() && obj.GetSize() >= 0
+}

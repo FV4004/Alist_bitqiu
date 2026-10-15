@@ -218,8 +218,8 @@ func BitQiuNASDownload(c *gin.Context) {
 	}
 	// Validate the whole selection before starting any tasks. Never allow this UI
 	// to overwrite an existing destination or switch to a cloud write operation.
-	if len(req.Names) == 0 || len(req.Names) > 500 {
-		common.ErrorStrResp(c, "请选择 1 至 500 项", 400)
+	if len(req.Names) == 0 || len(req.Names) > 50000 {
+		common.ErrorStrResp(c, "请选择 1 至 50000 项", 400)
 		return
 	}
 	seen := map[string]bool{}
@@ -245,5 +245,7 @@ func BitQiuNASDownload(c *gin.Context) {
 		common.ErrorResp(c, fmt.Errorf("NAS 下载不覆盖已有目标，请选择新的目录"), 400)
 		return
 	}
-	fsCopy(c, req)
+	if err := queueNASSelection(c, req, destination); err != nil {
+		common.ErrorResp(c, err, 400)
+	}
 }

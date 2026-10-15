@@ -545,3 +545,19 @@ func TestClientPageNullMarkerAndInvalidNames(t *testing.T) {
 		}
 	}
 }
+
+func TestClientObjectDistinguishesUnknownAndEmptySize(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		known bool
+		size  int64
+	}{{``, false, 0}, {`,"size":null`, false, 0}, {`,"size":"unknown"`, false, 0}, {`,"size":0`, true, 0}, {`,"fileSize":"42"`, true, 42}} {
+		obj, err := clientObject(json.RawMessage(`{"fileId":"fixture","name":"file","resourceType":2`+test.value+`}`), "0", "/", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if model.ObjectSizeKnown(obj) != test.known || test.known && obj.GetSize() != test.size {
+			t.Fatalf("%s: known=%v size=%d", test.value, model.ObjectSizeKnown(obj), obj.GetSize())
+		}
+	}
+}

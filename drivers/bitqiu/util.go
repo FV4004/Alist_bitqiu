@@ -11,11 +11,14 @@ import (
 
 type Object struct {
 	model.Object
+	SizeKnown       bool `json:"-"`
 	ParentID        string
 	ClientCursor    string
 	ClientIDSource  string `json:"-"`
 	ClientIDChanged bool   `json:"-"`
 }
+
+func (o *Object) IsSizeKnown() bool { return o.SizeKnown && o.Size >= 0 }
 
 func (r Resource) toObject(parentID, parentPath string) (model.Obj, error) {
 	id := r.ResourceID
@@ -33,6 +36,7 @@ func (r Resource) toObject(parentID, parentPath string) (model.Obj, error) {
 	if r.Size != nil {
 		if size, err := (*r.Size).Int64(); err == nil {
 			obj.Size = size
+			obj.SizeKnown = size >= 0
 		}
 	}
 	if ct := parseBitQiuTime(r.CreateTime); !ct.IsZero() {

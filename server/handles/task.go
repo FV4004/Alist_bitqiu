@@ -1,6 +1,7 @@
 package handles
 
 import (
+	"context"
 	"github.com/alist-org/alist/v3/internal/model"
 	taskpkg "github.com/alist-org/alist/v3/internal/task"
 	"math"
@@ -32,6 +33,25 @@ type TaskInfo struct {
 }
 
 func getTaskInfo[T taskpkg.TaskExtensionInfo](task T) TaskInfo {
+	if controlled, ok := any(task).(interface{ NASView() (fs.NASView, bool) }); ok {
+		if v, ok := controlled.NASView(); ok {
+			state := tache.StatePending
+			switch v.State {
+			case "downloading":
+				state = tache.StateRunning
+			case "pausing", "canceling":
+				state = tache.StateCanceling
+			case "paused", "canceled":
+				state = tache.StateCanceled
+			case "completed":
+				state = tache.StateSucceeded
+			case "failed":
+				state = tache.StateFailed
+			}
+			return TaskInfo{ID: v.ID, Name: v.Name, State: state, Status: v.State, Progress: v.Progress, StartTime: v.StartTime, EndTime: v.EndTime, TotalBytes: v.TotalBytes, TransferredBytes: v.TransferredBytes, SpeedBytesPerSecond: v.Speed, CompletionReason: v.CompletionReason, Error: v.Error}
+		}
+	}
+
 	errMsg := ""
 	if task.GetErr() != nil {
 		errMsg = task.GetErr().Error()
@@ -153,6 +173,17 @@ func getBatchHandler[T taskpkg.TaskExtensionInfo](manager taskpkg.Manager[T], ca
 	}
 }
 
+func retryTask[T taskpkg.TaskExtensionInfo](manager taskpkg.Manager[T], t T) error {
+	if controlled, ok := any(t).(interface{ NASView() (fs.NASView, bool) }); ok {
+		if v, yes := controlled.NASView(); yes {
+			_, err := fs.ControlNASDownload(context.Background(), v.ID, "start", false, t.GetCreator())
+			return err
+		}
+	}
+	manager.Retry(t.GetID())
+	return nil
+}
+
 func taskRoute[T taskpkg.TaskExtensionInfo](g *gin.RouterGroup, manager taskpkg.Manager[T]) {
 	g.GET("/undone", func(c *gin.Context) {
 		isAdmin, uid, ok := getUserInfo(c)
@@ -192,7 +223,10 @@ func taskRoute[T taskpkg.TaskExtensionInfo](g *gin.RouterGroup, manager taskpkg.
 		common.SuccessResp(c)
 	}))
 	g.POST("/retry", getTargetedHandler(manager, func(c *gin.Context, task T) {
-		manager.Retry(task.GetID())
+		if err := retryTask(manager, task); err != nil {
+			common.ErrorResp(c, err, 400)
+			return
+		}
 		common.SuccessResp(c)
 	}))
 	g.POST("/cancel_some", getBatchHandler(manager, func(task T) {
@@ -202,7 +236,7 @@ func taskRoute[T taskpkg.TaskExtensionInfo](g *gin.RouterGroup, manager taskpkg.
 		manager.Remove(task.GetID())
 	}))
 	g.POST("/retry_some", getBatchHandler(manager, func(task T) {
-		manager.Retry(task.GetID())
+		_ = retryTask(manager, task)
 	}))
 	g.POST("/clear_done", func(c *gin.Context) {
 		isAdmin, uid, ok := getUserInfo(c)
@@ -240,7 +274,7 @@ func taskRoute[T taskpkg.TaskExtensionInfo](g *gin.RouterGroup, manager taskpkg.
 			return (isAdmin || uid == task.GetCreator().ID) && task.GetState() == tache.StateFailed
 		})
 		for _, t := range tasks {
-			manager.Retry(t.GetID())
+			_ = retryTask(manager, t)
 		}
 		common.SuccessResp(c)
 	})

@@ -41,6 +41,7 @@ type ObjResp struct {
 	VirtualPath  string                     `json:"virtual_path"`
 	Name         string                     `json:"name"`
 	Size         int64                      `json:"size"`
+	SizeKnown    bool                       `json:"size_known"`
 	IsDir        bool                       `json:"is_dir"`
 	Modified     time.Time                  `json:"modified"`
 	Created      time.Time                  `json:"created"`
@@ -72,6 +73,7 @@ type ObjLabelResp struct {
 	VirtualPath  string                     `json:"virtual_path"`
 	Name         string                     `json:"name"`
 	Size         int64                      `json:"size"`
+	SizeKnown    bool                       `json:"size_known"`
 	IsDir        bool                       `json:"is_dir"`
 	Modified     time.Time                  `json:"modified"`
 	Created      time.Time                  `json:"created"`
@@ -335,6 +337,7 @@ func toObjsResp(objs []model.Obj, parent string, encrypt bool) []ObjLabelResp {
 			VirtualPath:  utils.FixAndCleanPath(stdpath.Join(parent, obj.GetName())),
 			Name:         obj.GetName(),
 			Size:         obj.GetSize(),
+			SizeKnown:    model.ObjectSizeKnown(obj),
 			IsDir:        obj.IsDir(),
 			Modified:     obj.ModTime(),
 			Created:      obj.CreateTime(),
@@ -470,6 +473,7 @@ func FsGet(c *gin.Context) {
 			VirtualPath:  utils.FixAndCleanPath(reqPath),
 			Name:         obj.GetName(),
 			Size:         obj.GetSize(),
+			SizeKnown:    model.ObjectSizeKnown(obj),
 			IsDir:        obj.IsDir(),
 			Modified:     obj.ModTime(),
 			Created:      obj.CreateTime(),

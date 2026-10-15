@@ -6,6 +6,7 @@ import (
 	"github.com/alist-org/alist/v3/internal/errs"
 	"net/http"
 	stdpath "path"
+	"sync"
 	"time"
 
 	"github.com/alist-org/alist/v3/internal/conf"
@@ -20,6 +21,9 @@ import (
 )
 
 type CopyTask struct {
+	NAS          *nasTask `json:"-"`
+	executionMu  sync.Mutex
+	executionErr error
 	task.TaskExtension
 	Status       string             `json:"-"` //don't save status to save space
 	SrcObjPath   string             `json:"src_path"`
@@ -41,11 +45,24 @@ func (t *CopyTask) GetStatus() string {
 }
 
 func (t *CopyTask) GetTransferSnapshot() task.TransferSnapshot {
+	if v, ok := t.NASView(); ok {
+		return task.TransferSnapshot{TransferredBytes: v.TransferredBytes, SpeedBytesPerSecond: v.Speed, CompletionReason: v.CompletionReason}
+	}
 	return t.Transfer.Snapshot(time.Now())
 }
-func (t *CopyTask) Cancel() { t.Transfer.CancelRequested(); t.TaskExtension.Cancel() }
+func (t *CopyTask) Cancel() {
+	if t.NAS != nil {
+		_, _ = ControlNASDownload(context.Background(), t.GetID(), "cancel", false, t.GetCreator())
+		return
+	}
+	t.Transfer.CancelRequested()
+	t.TaskExtension.Cancel()
+}
 
 func (t *CopyTask) Run() (err error) {
+	if t.NAS != nil {
+		return t.runNAS()
+	}
 	t.ReinitCtx()
 	t.Transfer.Start(time.Now())
 	t.ClearEndTime()

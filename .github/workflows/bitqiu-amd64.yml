@@ -25,6 +25,7 @@ jobs:
           go test -race ./drivers/bitqiu
           go test -race ./internal/op -run '^TestPendingLoginCanBeCreatedAndEdited$'
           go test -race ./server/handles -run '^Test(BitQiuNASIntegration|NASTaskInfo)$'
+          go test -race ./internal/fs -run '^TestNAS'
           go test -race ./internal/task
           go test -race ./server/nasui
           node --test scripts/nas-ui.test.cjs

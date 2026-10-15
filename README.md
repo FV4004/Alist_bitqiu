@@ -1,3 +1,5 @@
+> **本项目基于 AList 添加 BitQiu Driver 支持，保留 AList 的文件管理与 Docker 部署方式。**
+>
 > **BitQiu amd64 定制版：** [部署和短信验证说明](README_BITQIU.md) · [镜像和离线安装包](https://github.com/FV4004/Alist_bitqiu/releases)
 
 <div align="center">

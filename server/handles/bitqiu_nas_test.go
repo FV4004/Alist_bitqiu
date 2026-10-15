@@ -41,6 +41,10 @@ func TestBitQiuNASIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	db.Init(database)
+	fs.ResetNASDownloads()
+	if err := fs.InitNASDownloads(); err != nil {
+		t.Fatal(err)
+	}
 	op.ClearRoleCache()
 	for _, role := range []model.Role{
 		{ID: uint(model.ADMIN), Name: "admin", PermissionScopes: []model.PermissionEntry{{Path: "/", Permission: 65535}}},
@@ -59,6 +63,7 @@ func TestBitQiuNASIntegration(t *testing.T) {
 		for _, d := range op.GetAllStorages() {
 			_ = op.DisableStorage(context.Background(), d.GetStorage().ID)
 		}
+		fs.ResetNASDownloads()
 		fs.CopyTaskManager = oldManager
 		if originalDriver != nil {
 			op.RegisterDriver(originalDriver)
@@ -230,7 +235,10 @@ func TestBitQiuNASIntegration(t *testing.T) {
 		}
 		var transferred int64
 		for _, task := range fs.CopyTaskManager.GetAll() {
-			snapshot := task.GetTransferSnapshot()
+			snapshot, ok := task.NASView()
+			if !ok {
+				t.Fatal("missing NAS snapshot")
+			}
 			transferred += snapshot.TransferredBytes
 			if snapshot.CompletionReason != "completed" {
 				t.Fatalf("bad completed outcome: %+v", snapshot)
@@ -251,6 +259,62 @@ func TestBitQiuNASIntegration(t *testing.T) {
 		if code(invoke(BitQiuNASDownload, MoveCopyReq{SrcDir: "/cloud", DstDir: "/nas/Movies", Names: []string{"file-000.txt"}}, true)) == 200 {
 			t.Fatal("accepted existing destination")
 		}
+	})
+	t.Run("recursive size de-duplicates selected folders", func(t *testing.T) {
+		result := invoke(BitQiuNASStats, nasSelection{SrcDir: "/cloud", Names: []string{"folder", "file-000.txt", "folder"}}, true)
+		requireOK(t, result)
+		var stats nasSelectionStats
+		if err := json.Unmarshal(result["data"], &stats); err != nil {
+			t.Fatal(err)
+		}
+		if stats.SelectedCount != 2 || stats.FileCount != 2 || stats.KnownBytes != int64(len("nested fixture")+len("NAS download fixture")) || stats.UnknownCount != 0 {
+			t.Fatalf("wrong recursive total: %+v", stats)
+		}
+	})
+	t.Run("batch scope confirmation counts and waiting queue pause", func(t *testing.T) {
+		result := invoke(BitQiuNASDownload, MoveCopyReq{SrcDir: "/cloud", DstDir: "/nas/Movies", Names: []string{"file-003.txt", "file-004.txt"}}, true)
+		requireOK(t, result)
+		var response struct {
+			Tasks []struct {
+				ID string `json:"id"`
+			}
+		}
+		_ = json.Unmarshal(result["data"], &response)
+		ids := []string{response.Tasks[0].ID, response.Tasks[1].ID}
+		result = invoke(BitQiuNASControl, map[string]any{"scope": "selected", "ids": ids[:1], "action": "pause"}, true)
+		requireOK(t, result)
+		var counts struct{ Success, Failed, Skipped int }
+		_ = json.Unmarshal(result["data"], &counts)
+		if counts.Success != 0 || counts.Skipped != 1 {
+			t.Fatal("selected pause changed waiting task")
+		}
+		result = invoke(BitQiuNASControl, map[string]any{"scope": "all", "action": "pause"}, true)
+		requireOK(t, result)
+		_ = json.Unmarshal(result["data"], &counts)
+		if counts.Success != 2 {
+			t.Fatalf("all-pause missed waiting tasks: %+v", counts)
+		}
+		if code(invoke(BitQiuNASControl, map[string]any{"scope": "all", "action": "cancel"}, true)) == 200 {
+			t.Fatal("cancel without confirmation allowed")
+		}
+		result = invoke(BitQiuNASControl, map[string]any{"scope": "selected", "ids": []string{ids[0], "missing"}, "action": "cancel", "confirmed": true}, true)
+		requireOK(t, result)
+		_ = json.Unmarshal(result["data"], &counts)
+		if counts.Success != 1 || counts.Failed != 1 {
+			t.Fatalf("wrong counts: %+v", counts)
+		}
+		for _, v := range fs.NASDownloads() {
+			if v.ID == ids[1] && v.State != "paused" {
+				t.Fatal("selected cancel changed another task")
+			}
+		}
+		result = invoke(BitQiuNASTasks, nil, true)
+		requireOK(t, result)
+		if bytes.Contains(result["data"], []byte(dest)) || bytes.Contains(result["data"], []byte(source)) {
+			t.Fatal("physical path leaked")
+		}
+		result = invoke(BitQiuNASControl, map[string]any{"scope": "all", "action": "cancel", "confirmed": true}, true)
+		requireOK(t, result)
 	})
 	t.Run("validation before queueing", func(t *testing.T) {
 		if err := os.Symlink(filepath.Join(outside, "missing"), filepath.Join(dest, "file-001.txt")); err != nil {

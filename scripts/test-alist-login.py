@@ -114,9 +114,11 @@ async def check_nas_navigation(browser, prefix):
                 if body['path'] == '/@nas':
                     response = {'code': 500, 'message': 'failed get storage: storage not found; rawPath: /@nas', 'data': None}
                 else:
-                    response['data'] = {'content': [{'name': 'fixture.txt', 'is_dir': False, 'size': 123, 'modified': '2026-01-01T00:00:00Z', 'created': '2026-01-01T00:00:00Z', 'type': 0, 'sign': ''}], 'total': 1, 'filtered_total': 1, 'has_more': False, 'page': 1, 'per_page': -1, 'pages_total': 1, 'readme': '', 'header': '', 'write': False, 'provider': 'BitQiu'}
+                    response['data'] = {'content': [{'name': 'fixture.txt', 'is_dir': False, 'size': 123, 'size_known': True, 'modified': '2026-01-01T00:00:00Z', 'created': '2026-01-01T00:00:00Z', 'type': 0, 'sign': ''}], 'total': 1, 'filtered_total': 1, 'has_more': False, 'page': 1, 'per_page': -1, 'pages_total': 1, 'readme': '', 'header': '', 'write': False, 'provider': 'BitQiu'}
             elif path == '/api/admin/bitqiu/nas/targets':
                 response['data'] = {'cloud': [{'path': '/cloud', 'label': '/cloud'}], 'targets': [{'path': '/NAS下载', 'label': '/NAS下载'}], 'downloads_ready': True, 'downloads_enabled': True}
+            elif path == '/api/admin/bitqiu/nas/tasks':
+                response['data'] = {'active': [], 'history': []}
             elif path == '/api/admin/bitqiu/nas/download':
                 response['data'] = {'tasks': [{'id': 'fixture-download'}]}
             await request.fulfill(content_type='application/json', body=json.dumps(response))

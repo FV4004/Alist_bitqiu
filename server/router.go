@@ -136,6 +136,9 @@ func admin(g *gin.RouterGroup) {
 	nas.POST("/dirs", handles.BitQiuNASDirs)
 	nas.POST("/mkdir", handles.BitQiuNASMkdir)
 	nas.POST("/download", handles.BitQiuNASDownload)
+	nas.POST("/stats", handles.BitQiuNASStats)
+	nas.GET("/tasks", handles.BitQiuNASTasks)
+	nas.POST("/control", handles.BitQiuNASControl)
 
 	meta := g.Group("/meta")
 	meta.GET("/list", handles.ListMetas)
