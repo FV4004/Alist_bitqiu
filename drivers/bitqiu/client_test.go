@@ -350,3 +350,105 @@ func TestSMSCodeIsOptionalInDriverForm(t *testing.T) {
 	}
 	t.Fatal("sms_code field missing")
 }
+
+func TestBrowseNestedFoldersAndDownload(t *testing.T) {
+	var lists, downloads atomic.Int32
+	d := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.URL.Path {
+		case "/cfi/fs/dir/resources":
+			lists.Add(1)
+			switch r.Form.Get("parent_id") {
+			case "root":
+				reply(w, 10200, map[string]interface{}{"hasNext": false, "data": []map[string]interface{}{{"resourceId": "folder+/&=目录", "resourceType": 1, "name": "Folder"}}})
+			case "folder+/&=目录":
+				reply(w, 10200, map[string]interface{}{"hasNext": false, "data": []map[string]interface{}{{"dirId": "9007199254740993", "resourceType": 1, "name": "Nested"}}})
+			case "9007199254740993":
+				reply(w, 10200, map[string]interface{}{"hasNext": false, "data": []map[string]interface{}{{"fileId": "file", "resourceType": 2, "name": "File", "size": 123}}})
+			default:
+				t.Errorf("wrong nested directory ID %q", r.Form.Get("parent_id"))
+				w.WriteHeader(423)
+			}
+		case "/cfi/fs/download/file/url":
+			downloads.Add(1)
+			if r.Form.Get("file_ids") != "file" {
+				t.Error("wrong nested download ID")
+			}
+			reply(w, 10200, map[string]string{"fileId": "file", "url": "https://example.com/file"})
+		default:
+			t.Errorf("unexpected request %s", r.URL.Path)
+		}
+	})
+	d.state = clientState{Token: "secret", OpenID: "open", UserID: "1"}
+	var dir model.Obj = &model.Object{ID: "root", Path: "/root", IsFolder: true}
+	for level := 0; level < 3; level++ {
+		objs, err := d.List(context.Background(), dir, model.ListArgs{})
+		if err != nil || len(objs) != 1 {
+			t.Fatalf("level %d: %v", level, err)
+		}
+		dir = objs[0]
+	}
+	link, err := d.Link(context.Background(), dir, model.LinkArgs{})
+	if err != nil || link.URL != "https://example.com/file" || dir.GetPath() != "/root/Folder/Nested/File" || lists.Load() != 3 || downloads.Load() != 1 {
+		t.Fatalf("nested navigation failed: %v", err)
+	}
+}
+
+func TestHTTP423DiagnosticsDoNotLeakSecretsOrRetry(t *testing.T) {
+	for _, tc := range []struct{ name, contentType, body, code, kind string }{
+		{"json", "application/json", `{"code":10807,"message":"secret-token 13800000000","data":{"token":"secret-token"}}`, "10807", "JSON"},
+		{"html", "text/html", `<html>secret-token 13800000000</html>`, "none", "HTML"},
+		{"malicious_code", "application/json", `{"code":"secret-token","message":"secret-token"}`, "none", "JSON"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			d := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Content-Type", tc.contentType)
+				w.WriteHeader(423)
+				_, _ = w.Write([]byte(tc.body))
+			})
+			d.state = clientState{Token: "secret-token", OpenID: "open", UserID: "1"}
+			_, err := d.List(context.Background(), &model.Object{ID: "root"}, model.ListArgs{})
+			if err == nil {
+				t.Fatal("423 treated as success")
+			}
+			msg := err.Error()
+			if !strings.Contains(msg, "HTTP 423") || !strings.Contains(msg, "endpoint=/cfi/fs/dir/resources") || !strings.Contains(msg, "code="+tc.code) || !strings.Contains(msg, "response="+tc.kind) {
+				t.Fatalf("missing diagnostics: %s", msg)
+			}
+			if strings.Contains(msg, "secret-token") || strings.Contains(msg, "13800000000") || calls.Load() != 1 || d.state.Token != "secret-token" {
+				t.Fatal("error leaked secrets, retried or discarded a valid session without evidence")
+			}
+		})
+	}
+}
+
+func TestHTTPAuthCodeRefreshIsBounded(t *testing.T) {
+	for _, status := range []int{401, 403, 423} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			var lists, logins, sms atomic.Int32
+			d := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/cfi/fs/dir/resources":
+					lists.Add(1)
+					w.WriteHeader(status)
+					reply(w, 10401, nil)
+				case "/loginServer/login":
+					logins.Add(1)
+					reply(w, 10200, sessionData())
+				case "/loginServer/getMobileAuthCode":
+					sms.Add(1)
+					t.Error("read request sent SMS")
+				default:
+					t.Errorf("unexpected request %s", r.URL.Path)
+				}
+			})
+			d.state = clientState{Token: "old", OpenID: "open", UserID: "1"}
+			_, err := d.List(context.Background(), &model.Object{ID: "root"}, model.ListArgs{})
+			if err == nil || lists.Load() != 2 || logins.Load() != 1 || sms.Load() != 0 {
+				t.Fatalf("unbounded auth refresh: %v", err)
+			}
+		})
+	}
+}

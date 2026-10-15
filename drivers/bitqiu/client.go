@@ -292,19 +292,51 @@ func (d *BitQiu) clientRequest(ctx context.Context, endpoint string, fields url.
 		}
 		return out, errors.New("BitQiu API 网络请求失败，请检查 NAS 网络连接")
 	}
-	if resp.StatusCode() != http.StatusOK {
-		return out, fmt.Errorf("BitQiu API HTTP %d", resp.StatusCode())
-	}
 	var envelope map[string]json.RawMessage
-	if err = json.Unmarshal(resp.Body(), &envelope); err != nil {
-		return out, errors.New("BitQiu API 返回无效 JSON")
-	}
+	jsonErr := json.Unmarshal(resp.Body(), &envelope)
 	out.Code = rawText(envelope["code"])
-	out.Data = envelope["data"]
-	if out.Code == "" || strings.IndexFunc(out.Code, func(r rune) bool { return r < '0' || r > '9' }) >= 0 || len(out.Code) > 10 {
+	validCode := out.Code != "" && len(out.Code) <= 10 && strings.IndexFunc(out.Code, func(r rune) bool { return r < '0' || r > '9' }) < 0
+	if !validCode {
+		out.Code = ""
+	}
+	if resp.StatusCode() != http.StatusOK {
+		kind := "other"
+		if jsonErr == nil {
+			kind = "JSON"
+		} else if strings.Contains(strings.ToLower(resp.Header().Get("Content-Type")), "html") {
+			kind = "HTML"
+		}
+		// Never include the response body/message, headers or submitted fields:
+		// upstream errors can echo passwords, phone numbers or session tokens.
+		return out, &clientHTTPError{Status: resp.StatusCode(), Endpoint: endpoint, Code: out.Code, Kind: kind}
+	}
+	if jsonErr != nil {
+		return clientResponse{}, errors.New("BitQiu API 返回无效 JSON")
+	}
+	if !validCode {
 		return clientResponse{}, errors.New("BitQiu API 返回无效业务码")
 	}
+	out.Data = envelope["data"]
 	return out, nil
+}
+
+// A 423 alone does not establish an expired session or a locked directory.
+// Keep only safe metadata for diagnosis, and require an explicit auth code.
+type clientHTTPError struct {
+	Status               int
+	Endpoint, Code, Kind string
+}
+
+func (e *clientHTTPError) Error() string {
+	code := e.Code
+	if code == "" {
+		code = "none"
+	}
+	return fmt.Sprintf("BitQiu API HTTP %d (endpoint=%s, code=%s, response=%s)", e.Status, e.Endpoint, code, e.Kind)
+}
+func clientHTTPAuthError(err error, code string) bool {
+	var httpErr *clientHTTPError
+	return errors.As(err, &httpErr) && (httpErr.Status == 401 || httpErr.Status == 403 || httpErr.Status == 423) && isClientAuthCode(code)
 }
 
 type clientAuthError struct{}
@@ -324,7 +356,7 @@ func (d *BitQiu) authenticatedClientRequest(ctx context.Context, endpoint string
 		form.Set("open_id", d.state.OpenID)
 		form.Set("user_id", d.state.UserID)
 		resp, err := d.clientRequest(ctx, endpoint, form, false)
-		if err != nil {
+		if err != nil && !clientHTTPAuthError(err, resp.Code) {
 			return resp, err
 		}
 		if !isClientAuthCode(resp.Code) {
@@ -349,7 +381,7 @@ func (d *BitQiu) authenticatedClientRequest(ctx context.Context, endpoint string
 func (d *BitQiu) checkClientSession(ctx context.Context) error {
 	form := url.Values{"access_token": {d.state.Token}, "open_id": {d.state.OpenID}, "user_id": {d.state.UserID}}
 	resp, err := d.clientRequest(ctx, "/user/get", form, false)
-	if err != nil {
+	if err != nil && !clientHTTPAuthError(err, resp.Code) {
 		return err
 	}
 	if isClientAuthCode(resp.Code) {
