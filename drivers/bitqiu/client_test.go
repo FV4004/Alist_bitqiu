@@ -452,3 +452,25 @@ func TestHTTPAuthCodeRefreshIsBounded(t *testing.T) {
 		})
 	}
 }
+
+func TestClientObjectPrefersTypeSpecificID(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw, want, source string
+		folder                  bool
+	}{
+		{"folder", `{"name":"Folder","resourceType":1,"resourceId":"resource-reference","fileId":"file-reference","dirId":"directory-id"}`, "directory-id", "dirId", true},
+		{"folder_container", `{"name":"Folder","resourceId":"resource-reference","dir_id":"directory-id"}`, "directory-id", "dir_id", true},
+		{"file", `{"name":"File","resourceType":2,"resourceId":"resource-reference","dirId":"parent-directory","fileId":"file-id"}`, "file-id", "fileId", false},
+		{"generic_folder", `{"name":"Folder","resourceType":1,"resourceId":"directory-id"}`, "directory-id", "resourceId", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			obj, err := clientObject(json.RawMessage(tc.raw), "root", "/root", tc.folder)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if obj.GetID() != tc.want || obj.IsDir() != tc.folder || obj.(*Object).ClientIDSource != tc.source {
+				t.Fatal("wrong type-specific resource ID")
+			}
+		})
+	}
+}

@@ -447,13 +447,25 @@ func clientObject(raw json.RawMessage, parentID, parentPath string, folder bool)
 	if err != nil {
 		return nil, err
 	}
-	id := textField(m, "resourceId", "resource_id", "fileId", "file_id", "dirId", "dir_id", "id")
+	folder = folder || intField(m, "resourceType", "resource_type") == 1
+	keys := []string{"fileId", "file_id", "resourceId", "resource_id", "id"}
+	if folder {
+		keys = []string{"dirId", "dir_id", "resourceId", "resource_id", "id"}
+	}
+	id, source := "", ""
+	for _, key := range keys {
+		if value := textField(m, key); value != "" {
+			id, source = value, key
+			break
+		}
+	}
 	name := textField(m, "name", "fileName", "file_name")
 	if id == "" || name == "" {
 		return nil, errors.New("BitQiu 文件元数据缺少 ID 或文件名")
 	}
-	typ := intField(m, "resourceType", "resource_type")
-	o := &Object{Object: model.Object{ID: id, Name: name, IsFolder: folder || typ == 1, Size: intField(m, "size", "fileSize", "file_size")}, ParentID: parentID}
+	o := &Object{Object: model.Object{ID: id, Name: name, IsFolder: folder, Size: intField(m, "size", "fileSize", "file_size")}, ParentID: parentID}
+	o.ClientIDSource = source
+	o.ClientIDChanged = id != textField(m, "resourceId", "resource_id", "fileId", "file_id", "dirId", "dir_id", "id")
 	o.ClientCursor = textField(m, "sort")
 	o.SetPath(path.Join(parentPath, name))
 	for _, entry := range []struct {

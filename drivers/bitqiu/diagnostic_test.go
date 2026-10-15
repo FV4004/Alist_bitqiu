@@ -104,3 +104,68 @@ func TestDiagnosticWithoutSessionDoesNotSendAnyRequests(t *testing.T) {
 		t.Fatal("diagnostic without session performed a login or request")
 	}
 }
+
+func TestDiagnosticIncludesChildAndKeepsClientResultsSeparate(t *testing.T) {
+	if _, err := exec.LookPath("wget"); err != nil {
+		t.Skip("wget not installed")
+	}
+	t.Setenv("no_proxy", "127.0.0.1,localhost")
+	temp := t.TempDir()
+	t.Setenv("TMPDIR", temp)
+	var mu sync.Mutex
+	var roots, children []url.Values
+	d := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != diagnosticEndpoint {
+			t.Errorf("unexpected request %s", r.URL.Path)
+		}
+		_ = r.ParseForm()
+		mu.Lock()
+		defer mu.Unlock()
+		switch r.Form.Get("parent_id") {
+		case "private-root":
+			roots = append(roots, r.PostForm)
+			reply(w, 10200, map[string]interface{}{"hasNext": false, "data": []map[string]interface{}{{"name": "private-folder-name", "resourceType": 1, "resourceId": "private-resource-reference", "dirId": "private-directory-id"}}})
+		case "private-directory-id":
+			children = append(children, r.PostForm)
+			if len(children) == 1 {
+				w.WriteHeader(423)
+				return
+			}
+			reply(w, 10200, map[string]interface{}{"hasNext": false, "data": []interface{}{}})
+		default:
+			t.Error("child diagnostic used a generic resource ID instead of the directory ID")
+		}
+	})
+	d.state = clientState{Binding: d.binding(), Token: "secret-token", OpenID: "private-open", UserID: "1"}
+	d.RootFolderID = "private-root"
+	d.saveClient()
+	before := d.ClientState
+	d.LoginAction = "diagnose_http"
+	err := d.Init(context.Background())
+	if err == nil {
+		t.Fatal("missing diagnostic summary")
+	}
+	msg := err.Error()
+	for _, part := range []string{"root{Go[HTTP=200,code=10200]", "child{id_source=dirId,legacy_id_diff=true;Go[HTTP=423", "wget[HTTP=200,code=10200"} {
+		if !strings.Contains(msg, part) {
+			t.Fatalf("missing child diagnostics: %s", msg)
+		}
+	}
+	for _, secret := range []string{"private-root", "private-directory-id", "private-resource-reference", "private-folder-name", "private-open", "secret-token"} {
+		if strings.Contains(msg, secret) {
+			t.Fatal("child diagnostic leaked private metadata")
+		}
+	}
+	if d.ClientState != before || d.LoginAction != "none" {
+		t.Fatal("child diagnostic altered the session")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(roots) != 2 || len(children) != 2 || roots[0].Encode() != roots[1].Encode() || children[0].Encode() != children[1].Encode() {
+		t.Fatal("requests for root/child were not compared with identical fields")
+	}
+	entries, err := os.ReadDir(temp)
+	if err != nil || len(entries) != 0 {
+		t.Fatal("temporary files retained after child diagnostics")
+	}
+}

@@ -11,8 +11,10 @@ import (
 
 type Object struct {
 	model.Object
-	ParentID     string
-	ClientCursor string
+	ParentID        string
+	ClientCursor    string
+	ClientIDSource  string `json:"-"`
+	ClientIDChanged bool   `json:"-"`
 }
 
 func (r Resource) toObject(parentID, parentPath string) (model.Obj, error) {

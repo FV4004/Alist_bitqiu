@@ -20,13 +20,41 @@ import (
 const diagnosticEndpoint = "/cfi/fs/dir/resources"
 
 // Triggered only by the one-shot diagnose_http action. No login, refresh or SMS
-// requests are made. Both clients submit the same existing session and fields.
+// requests are made. Both clients submit the same existing session and fields for the root and
+// the first folder found on the root page.
 func (d *BitQiu) diagnoseHTTP(ctx context.Context) error {
 	if d.state.Token == "" || d.state.OpenID == "" || d.state.UserID == "" {
 		return errors.New("BitQiu 诊断未执行：缺少完整已保存会话；未重新登录或发送短信")
 	}
+	rootID := d.resolveParentID(nil)
+	resp, rootSummary := d.diagnosticCompare(ctx, rootID)
+	childSummary := "skipped_root_response"
+	if resp.Code == successCode && len(resp.Data) != 0 {
+		objects, _, err := parseClientPage(resp.Data, rootID, "/", d.pageSize())
+		if err != nil {
+			childSummary = "metadata_unrecognized"
+		} else {
+			childSummary = "none_on_first_page"
+			for _, object := range objects {
+				if !object.IsDir() {
+					continue
+				}
+				folder := object.(*Object)
+				_, result := d.diagnosticCompare(ctx, folder.GetID())
+				childSummary = fmt.Sprintf("id_source=%s,legacy_id_diff=%t;%s", folder.ClientIDSource, folder.ClientIDChanged, result)
+				break
+			}
+		}
+	}
+	// Only fixed labels, counts and numeric codes are reported. Names, IDs,
+	// credentials, raw responses and wget output never enter the summary.
+	return fmt.Errorf("BitQiu 诊断完成（未重新登录或发送短信）：root{%s}；child{%s}；操作已恢复 none，请重新打开编辑页保存恢复加载", rootSummary, childSummary)
+}
+
+// Each pair uses identical fields and the same saved session, without refresh.
+func (d *BitQiu) diagnosticCompare(ctx context.Context, parentID string) (clientResponse, string) {
 	fields := url.Values{
-		"parent_id": {d.resolveParentID(nil)}, "limit": {strconv.Itoa(d.pageSize())},
+		"parent_id": {parentID}, "limit": {strconv.Itoa(d.pageSize())},
 		"sort": {""}, "desc": {d.orderDesc()}, "order": {d.orderType()}, "model": {"1"},
 		"access_token": {d.state.Token}, "open_id": {d.state.OpenID}, "user_id": {d.state.UserID},
 	}
@@ -54,9 +82,7 @@ func (d *BitQiu) diagnoseHTTP(ctx context.Context) error {
 		host = clientBaseURL
 	}
 	wget := diagnosticWget(ctx, host+diagnosticEndpoint, form.Encode())
-	// Deliberately do not return raw errors, response data, headers or wget output.
-	// UpdateStorage preserves this summary as the storage status for browser users.
-	return fmt.Errorf("BitQiu 诊断完成（未重新登录或发送短信）：Go[%s]；wget[%s]；操作已恢复 none，重新打开编辑页可正常保存", native, wget)
+	return resp, fmt.Sprintf("Go[%s]；wget[%s]", native, wget)
 }
 
 func diagnosticCode(code string) string {
