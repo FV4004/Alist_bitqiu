@@ -148,7 +148,7 @@ func getTargetedHandler[T taskpkg.TaskExtensionInfo](manager taskpkg.Manager[T],
 	}
 }
 
-func getBatchHandler[T taskpkg.TaskExtensionInfo](manager taskpkg.Manager[T], callback func(task T)) gin.HandlerFunc {
+func getBatchHandler[T taskpkg.TaskExtensionInfo](manager taskpkg.Manager[T], callback func(task T) error) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		isAdmin, uid, ok := getUserInfo(c)
 		if !ok {
@@ -167,7 +167,9 @@ func getBatchHandler[T taskpkg.TaskExtensionInfo](manager taskpkg.Manager[T], ca
 				retErrs[tid] = "task not found"
 				continue
 			}
-			callback(t)
+			if err := callback(t); err != nil {
+				retErrs[tid] = err.Error()
+			}
 		}
 		common.SuccessResp(c, retErrs)
 	}
@@ -229,14 +231,16 @@ func taskRoute[T taskpkg.TaskExtensionInfo](g *gin.RouterGroup, manager taskpkg.
 		}
 		common.SuccessResp(c)
 	}))
-	g.POST("/cancel_some", getBatchHandler(manager, func(task T) {
+	g.POST("/cancel_some", getBatchHandler(manager, func(task T) error {
 		manager.Cancel(task.GetID())
+		return nil
 	}))
-	g.POST("/delete_some", getBatchHandler(manager, func(task T) {
+	g.POST("/delete_some", getBatchHandler(manager, func(task T) error {
 		manager.Remove(task.GetID())
+		return nil
 	}))
-	g.POST("/retry_some", getBatchHandler(manager, func(task T) {
-		_ = retryTask(manager, task)
+	g.POST("/retry_some", getBatchHandler(manager, func(task T) error {
+		return retryTask(manager, task)
 	}))
 	g.POST("/clear_done", func(c *gin.Context) {
 		isAdmin, uid, ok := getUserInfo(c)

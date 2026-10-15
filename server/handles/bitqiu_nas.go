@@ -245,7 +245,7 @@ func BitQiuNASDownload(c *gin.Context) {
 		common.ErrorResp(c, fmt.Errorf("NAS 下载不覆盖已有目标，请选择新的目录"), 400)
 		return
 	}
-	if err := queueNASSelection(c, req, destination); err != nil {
+	if err := queueNASSelection(c, req, dst); err != nil {
 		common.ErrorResp(c, err, 400)
 	}
 }
