@@ -19,6 +19,7 @@ type Addition struct {
 	OrderType      string `json:"order_type" type:"select" options:"updateTime,createTime,name,size" default:"updateTime"`
 	OrderDesc      bool   `json:"order_desc"`
 	PageSize       string `json:"page_size" default:"24" help:"Number of entries to request per page."`
+	PageIntervalMS string `json:"page_interval_ms" default:"1000" help:"Windows 模式目录请求间隔（毫秒），默认 1000；0 禁用，最大 30000。空响应 423 最多退避重试两次，不重新登录或发短信。"`
 	UserAgent      string `json:"user_agent" default:"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"`
 }
 

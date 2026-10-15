@@ -311,7 +311,7 @@ func (d *BitQiu) clientRequest(ctx context.Context, endpoint string, fields url.
 		}
 		// Never include the response body/message, headers or submitted fields:
 		// upstream errors can echo passwords, phone numbers or session tokens.
-		return out, &clientHTTPError{Status: resp.StatusCode(), Endpoint: endpoint, Code: out.Code, Kind: kind, BodyBytes: len(resp.Body())}
+		return out, &clientHTTPError{Status: resp.StatusCode(), Endpoint: endpoint, Code: out.Code, Kind: kind, BodyBytes: len(resp.Body()), RetryAfter: clientRetryAfter(resp.Header().Get("Retry-After"), time.Now())}
 	}
 	if jsonErr != nil {
 		return clientResponse{}, errors.New("BitQiu API 返回无效 JSON")
@@ -328,6 +328,7 @@ func (d *BitQiu) clientRequest(ctx context.Context, endpoint string, fields url.
 type clientHTTPError struct {
 	Status               int
 	BodyBytes            int
+	RetryAfter           time.Duration
 	Endpoint, Code, Kind string
 }
 
@@ -361,6 +362,11 @@ func (d *BitQiu) authenticatedClientRequest(ctx context.Context, endpoint string
 		form.Set("access_token", d.state.Token)
 		form.Set("open_id", d.state.OpenID)
 		form.Set("user_id", d.state.UserID)
+		if endpoint == diagnosticEndpoint {
+			if err := d.paceClientPage(ctx); err != nil {
+				return clientResponse{}, err
+			}
+		}
 		resp, err := d.clientRequest(ctx, endpoint, form, false)
 		if err != nil && !clientHTTPAuthError(err, resp.Code) {
 			return resp, err
@@ -572,7 +578,7 @@ func (d *BitQiu) listWindows(ctx context.Context, dir model.Obj) ([]model.Obj, e
 	cursor := ""
 	for page := 1; page <= 10000; page++ {
 		form := url.Values{"parent_id": {parentID}, "limit": {strconv.Itoa(limit)}, "sort": {cursor}, "desc": {d.orderDesc()}, "order": {d.orderType()}, "model": {"1"}}
-		resp, err := d.authenticatedClientRequest(ctx, "/cfi/fs/dir/resources", form)
+		resp, err := d.clientPageRequest(ctx, form)
 		if err != nil {
 			return nil, clientPageError(page, cursor, err)
 		}

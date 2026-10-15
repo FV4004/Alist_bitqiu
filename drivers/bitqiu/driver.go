@@ -56,11 +56,13 @@ type BitQiu struct {
 	model.Storage
 	Addition
 
-	client   *resty.Client
-	userID   string
-	clientMu sync.Mutex
-	apiBase  string // test transport override; never exposed as a storage setting
-	state    clientState
+	client          *resty.Client
+	userID          string
+	clientMu        sync.Mutex
+	apiBase         string // test transport override; never exposed as a storage setting
+	state           clientState
+	lastPageRequest time.Time
+	pageDelayWait   func(context.Context, time.Duration) error // deterministic wait injection for tests
 }
 
 func (d *BitQiu) Config() driver.Config {

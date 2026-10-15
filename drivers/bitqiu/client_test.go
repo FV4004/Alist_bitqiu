@@ -21,10 +21,10 @@ func testClient(t *testing.T, handler http.HandlerFunc) *BitQiu {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	return &BitQiu{Addition: Addition{Username: "user", Password: "password", ClientPlatform: "stable-device", ClientChannel: "pc"}, apiBase: server.URL, client: resty.New()}
+	return &BitQiu{Addition: Addition{Username: "user", Password: "password", ClientPlatform: "stable-device", ClientChannel: "pc", PageIntervalMS: "0"}, pageDelayWait: func(ctx context.Context, _ time.Duration) error { return ctx.Err() }, apiBase: server.URL, client: resty.New()}
 }
 func cloneClient(d *BitQiu) *BitQiu {
-	return &BitQiu{Addition: d.Addition, apiBase: d.apiBase, client: resty.New()}
+	return &BitQiu{Addition: d.Addition, pageDelayWait: d.pageDelayWait, apiBase: d.apiBase, client: resty.New()}
 }
 func reply(w http.ResponseWriter, code interface{}, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -494,12 +494,12 @@ func TestListingHTTP423ReportsSecondPageWithoutLeakingCursor(t *testing.T) {
 		}
 	})
 	d.state = clientState{Token: "private-token", OpenID: "open", UserID: "1"}
-	_, err := d.List(context.Background(), &model.Object{ID: "child"}, model.ListArgs{})
-	if err == nil {
-		t.Fatal("expected second-page failure")
+	files, err := d.List(context.Background(), &model.Object{ID: "child"}, model.ListArgs{})
+	if err == nil || len(files) != 0 {
+		t.Fatal("expected second-page failure without a partial directory")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "page=2,cursor_present=true") || !strings.Contains(msg, "HTTP 423") || !strings.Contains(msg, "bytes=0") || calls.Load() != 2 {
+	if !strings.Contains(msg, "page=2,cursor_present=true") || !strings.Contains(msg, "HTTP 423") || !strings.Contains(msg, "bytes=0") || calls.Load() != 4 {
 		t.Fatalf("missing failure-page context: %s", msg)
 	}
 	for _, secret := range []string{cursor, "private-name", "private-token"} {
