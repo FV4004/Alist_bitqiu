@@ -213,7 +213,7 @@ func TestCursorPaginationAndTokenRefresh(t *testing.T) {
 		case "/cfi/fs/dir/resources":
 			pages.Add(1)
 			if r.Form.Get("access_token") == "expired" {
-				reply(w, 10401, nil)
+				reply(w, 10404, nil)
 				return
 			}
 			if r.Form.Get("parent_id") != "root" {
@@ -252,7 +252,7 @@ func TestNoInfiniteRefreshOrAutomaticSMS(t *testing.T) {
 		if r.URL.Path == "/loginServer/login" {
 			reply(w, 10807, map[string]string{"temp_token": "challenge"})
 		} else {
-			reply(w, 10401, nil)
+			reply(w, 10404, nil)
 		}
 	})
 	d.state = clientState{Binding: d.binding(), Token: "expired", OpenID: "open", UserID: "1"}
@@ -433,7 +433,7 @@ func TestHTTPAuthCodeRefreshIsBounded(t *testing.T) {
 				case "/cfi/fs/dir/resources":
 					lists.Add(1)
 					w.WriteHeader(status)
-					reply(w, 10401, nil)
+					reply(w, 10404, nil)
 				case "/loginServer/login":
 					logins.Add(1)
 					reply(w, 10200, sessionData())

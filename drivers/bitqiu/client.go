@@ -133,8 +133,11 @@ func (d *BitQiu) initWindows(ctx context.Context) error {
 		d.state = clientState{Binding: binding}
 	}
 	d.saveClient()
-	if action != "" && action != "none" && action != "send_sms" && action != "verify_sms" && action != "reset_login" {
+	if action != "" && action != "none" && action != "send_sms" && action != "verify_sms" && action != "reset_login" && action != "diagnose_http" {
 		return errors.New("unsupported BitQiu login_action")
+	}
+	if action == "diagnose_http" {
+		return d.diagnoseHTTP(ctx)
 	}
 	if d.state.TempToken != "" && time.Since(time.Unix(d.state.ChallengedAt, 0)) > challengeLifetime {
 		d.clearChallenge()
@@ -308,7 +311,7 @@ func (d *BitQiu) clientRequest(ctx context.Context, endpoint string, fields url.
 		}
 		// Never include the response body/message, headers or submitted fields:
 		// upstream errors can echo passwords, phone numbers or session tokens.
-		return out, &clientHTTPError{Status: resp.StatusCode(), Endpoint: endpoint, Code: out.Code, Kind: kind}
+		return out, &clientHTTPError{Status: resp.StatusCode(), Endpoint: endpoint, Code: out.Code, Kind: kind, BodyBytes: len(resp.Body())}
 	}
 	if jsonErr != nil {
 		return clientResponse{}, errors.New("BitQiu API 返回无效 JSON")
@@ -324,6 +327,7 @@ func (d *BitQiu) clientRequest(ctx context.Context, endpoint string, fields url.
 // Keep only safe metadata for diagnosis, and require an explicit auth code.
 type clientHTTPError struct {
 	Status               int
+	BodyBytes            int
 	Endpoint, Code, Kind string
 }
 
@@ -332,7 +336,7 @@ func (e *clientHTTPError) Error() string {
 	if code == "" {
 		code = "none"
 	}
-	return fmt.Sprintf("BitQiu API HTTP %d (endpoint=%s, code=%s, response=%s)", e.Status, e.Endpoint, code, e.Kind)
+	return fmt.Sprintf("BitQiu API HTTP %d (endpoint=%s, code=%s, response=%s, bytes=%d)", e.Status, e.Endpoint, code, e.Kind, e.BodyBytes)
 }
 func clientHTTPAuthError(err error, code string) bool {
 	var httpErr *clientHTTPError
@@ -341,8 +345,10 @@ func clientHTTPAuthError(err error, code string) bool {
 
 type clientAuthError struct{}
 
-func (*clientAuthError) Error() string  { return "BitQiu 登录已过期" }
-func isClientAuthCode(code string) bool { return code == "10401" || code == "10404" || code == "20003" }
+func (*clientAuthError) Error() string { return "BitQiu 登录已过期" }
+
+// 10401 is also used for invalid parameters; it must not discard the saved session.
+func isClientAuthCode(code string) bool { return code == "10404" || code == "20003" }
 func (d *BitQiu) authenticatedClientRequest(ctx context.Context, endpoint string, fields url.Values) (clientResponse, error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		if d.state.Token == "" {
