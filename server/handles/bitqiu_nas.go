@@ -37,6 +37,7 @@ type nasTarget struct {
 // Addition: it can contain the BitQiu password or saved access tokens.
 func BitQiuNASTargets(c *gin.Context) {
 	cloud, targets := []nasTarget{}, []nasTarget{}
+	downloadsEnabled := false
 	for _, d := range op.GetAllStorages() {
 		st := d.GetStorage()
 		if st.Disabled {
@@ -47,13 +48,16 @@ func BitQiuNASTargets(c *gin.Context) {
 		case "BitQiu":
 			cloud = append(cloud, item)
 		case "Local":
+			if l, ok := d.(*local.Local); ok && filepath.Clean(l.GetRootPath()) == nasDownloadRoot {
+				downloadsEnabled = true
+			}
 			targets = append(targets, item)
 		}
 	}
 	sort.Slice(cloud, func(i, j int) bool { return cloud[i].Path < cloud[j].Path })
 	sort.Slice(targets, func(i, j int) bool { return targets[i].Path < targets[j].Path })
 	info, err := os.Stat(nasDownloadRoot)
-	common.SuccessResp(c, gin.H{"cloud": cloud, "targets": targets, "downloads_ready": err == nil && info.IsDir()})
+	common.SuccessResp(c, gin.H{"cloud": cloud, "targets": targets, "downloads_ready": err == nil && info.IsDir(), "downloads_enabled": downloadsEnabled})
 }
 func enableNASDownloads(ctx context.Context, root, mount string) error {
 	nasEnableMu.Lock()

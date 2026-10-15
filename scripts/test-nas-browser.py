@@ -22,7 +22,7 @@ with sync_playwright() as p:
     endpoint=path.split('/api',1)[1]
     body=r.request.post_data_json if r.request.post_data else None
     data=None
-    if endpoint=='/admin/bitqiu/nas/targets': data={'cloud':[{'path':'/网盘','label':'/网盘'}],'targets':[{'path':'/NAS下载','label':'/NAS下载'}],'downloads_ready':True}
+    if endpoint=='/admin/bitqiu/nas/targets': data={'cloud':[{'path':'/网盘','label':'/网盘'}],'targets':[{'path':'/NAS下载','label':'/NAS下载'}],'downloads_ready':True,'downloads_enabled':True}
     elif endpoint=='/fs/list':
      requests.append(body)
      n,size=body['page'],body['per_page']
