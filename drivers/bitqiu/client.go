@@ -542,6 +542,22 @@ func parseClientPage(raw json.RawMessage, parentID, parentPath string, limit int
 	}
 	return objs, count == limit, nil
 }
+
+// Shared by normal listing and diagnostics so they follow the same cursor path.
+func clientPageCursor(objects []model.Obj, current string) (string, error) {
+	if len(objects) == 0 {
+		return "", errors.New("BitQiu 目录没有下一页对象")
+	}
+	last := objects[len(objects)-1].(*Object).ClientCursor
+	if last == "" || last == current {
+		return "", errors.New("BitQiu 目录缺少下一页 sort 游标，已终止以避免遗漏文件")
+	}
+	return last, nil
+}
+func clientPageError(page int, cursor string, err error) error {
+	return fmt.Errorf("BitQiu 目录读取失败（page=%d,cursor_present=%t）：%w", page, cursor != "", err)
+}
+
 func (d *BitQiu) listWindows(ctx context.Context, dir model.Obj) ([]model.Obj, error) {
 	d.clientMu.Lock()
 	defer d.clientMu.Unlock()
@@ -558,14 +574,14 @@ func (d *BitQiu) listWindows(ctx context.Context, dir model.Obj) ([]model.Obj, e
 		form := url.Values{"parent_id": {parentID}, "limit": {strconv.Itoa(limit)}, "sort": {cursor}, "desc": {d.orderDesc()}, "order": {d.orderType()}, "model": {"1"}}
 		resp, err := d.authenticatedClientRequest(ctx, "/cfi/fs/dir/resources", form)
 		if err != nil {
-			return nil, err
+			return nil, clientPageError(page, cursor, err)
 		}
 		if resp.Code != successCode {
-			return nil, fmt.Errorf("BitQiu 列目录失败（code=%s）", resp.Code)
+			return nil, clientPageError(page, cursor, fmt.Errorf("BitQiu 列目录失败（code=%s）", resp.Code))
 		}
 		objs, more, err := parseClientPage(resp.Data, parentID, parentPath, limit)
 		if err != nil {
-			return nil, err
+			return nil, clientPageError(page, cursor, err)
 		}
 		added := 0
 		for _, o := range objs {
@@ -580,11 +596,11 @@ func (d *BitQiu) listWindows(ctx context.Context, dir model.Obj) ([]model.Obj, e
 			return all, nil
 		}
 		if added == 0 {
-			return nil, errors.New("BitQiu 目录分页未前进，已终止以避免遗漏文件；请检查客户端 API 分页协议")
+			return nil, clientPageError(page, cursor, errors.New("BitQiu 目录分页未前进，已终止以避免遗漏文件；请检查客户端 API 分页协议"))
 		}
-		last := objs[len(objs)-1].(*Object).ClientCursor
-		if last == "" || last == cursor {
-			return nil, errors.New("BitQiu 目录缺少下一页 sort 游标，已终止以避免遗漏文件")
+		last, err := clientPageCursor(objs, cursor)
+		if err != nil {
+			return nil, clientPageError(page, cursor, err)
 		}
 		cursor = last
 	}

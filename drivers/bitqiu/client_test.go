@@ -474,3 +474,37 @@ func TestClientObjectPrefersTypeSpecificID(t *testing.T) {
 		})
 	}
 }
+
+func TestListingHTTP423ReportsSecondPageWithoutLeakingCursor(t *testing.T) {
+	var calls atomic.Int32
+	const cursor = "private-cursor+&/%=目录"
+	d := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		_ = r.ParseForm()
+		if r.URL.Path != diagnosticEndpoint {
+			t.Errorf("unexpected operation %s", r.URL.Path)
+		}
+		if r.Form.Get("sort") == "" {
+			reply(w, 10200, map[string]interface{}{"hasNext": true, "data": []map[string]interface{}{{"resourceId": "file", "name": "private-name", "resourceType": 2, "sort": cursor}}})
+		} else {
+			if r.Form.Get("sort") != cursor {
+				t.Error("pagination cursor changed")
+			}
+			w.WriteHeader(423)
+		}
+	})
+	d.state = clientState{Token: "private-token", OpenID: "open", UserID: "1"}
+	_, err := d.List(context.Background(), &model.Object{ID: "child"}, model.ListArgs{})
+	if err == nil {
+		t.Fatal("expected second-page failure")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "page=2,cursor_present=true") || !strings.Contains(msg, "HTTP 423") || !strings.Contains(msg, "bytes=0") || calls.Load() != 2 {
+		t.Fatalf("missing failure-page context: %s", msg)
+	}
+	for _, secret := range []string{cursor, "private-name", "private-token"} {
+		if strings.Contains(msg, secret) {
+			t.Fatal("pagination error leaked private values")
+		}
+	}
+}

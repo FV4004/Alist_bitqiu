@@ -21,13 +21,13 @@ const diagnosticEndpoint = "/cfi/fs/dir/resources"
 
 // Triggered only by the one-shot diagnose_http action. No login, refresh or SMS
 // requests are made. Both clients submit the same existing session and fields for the root and
-// the first folder found on the root page.
+// up to three pages of the first folder found on the root page.
 func (d *BitQiu) diagnoseHTTP(ctx context.Context) error {
 	if d.state.Token == "" || d.state.OpenID == "" || d.state.UserID == "" {
 		return errors.New("BitQiu 诊断未执行：缺少完整已保存会话；未重新登录或发送短信")
 	}
 	rootID := d.resolveParentID(nil)
-	resp, rootSummary := d.diagnosticCompare(ctx, rootID)
+	resp, rootSummary := d.diagnosticCompare(ctx, rootID, "")
 	childSummary := "skipped_root_response"
 	if resp.Code == successCode && len(resp.Data) != 0 {
 		objects, _, err := parseClientPage(resp.Data, rootID, "/", d.pageSize())
@@ -40,7 +40,7 @@ func (d *BitQiu) diagnoseHTTP(ctx context.Context) error {
 					continue
 				}
 				folder := object.(*Object)
-				_, result := d.diagnosticCompare(ctx, folder.GetID())
+				result := d.diagnosticPages(ctx, folder.GetID())
 				childSummary = fmt.Sprintf("id_source=%s,legacy_id_diff=%t;%s", folder.ClientIDSource, folder.ClientIDChanged, result)
 				break
 			}
@@ -51,11 +51,48 @@ func (d *BitQiu) diagnoseHTTP(ctx context.Context) error {
 	return fmt.Errorf("BitQiu 诊断完成（未重新登录或发送短信）：root{%s}；child{%s}；操作已恢复 none，请重新打开编辑页保存恢复加载", rootSummary, childSummary)
 }
 
+// Bounded to three child pages: enough to inspect the transition from the
+// successful first page without scanning the entire account or exposing cursors.
+func (d *BitQiu) diagnosticPages(ctx context.Context, parentID string) string {
+	cursor := ""
+	var summaries []string
+	for page := 1; page <= 3; page++ {
+		resp, summary := d.diagnosticCompare(ctx, parentID, cursor)
+		prefix := fmt.Sprintf("page%d{%s", page, summary)
+		if resp.Code != successCode || len(resp.Data) == 0 {
+			summaries = append(summaries, prefix+";stop=request_failed}")
+			break
+		}
+		objects, more, err := parseClientPage(resp.Data, parentID, "/", d.pageSize())
+		if err != nil {
+			summaries = append(summaries, prefix+";stop=metadata_unrecognized}")
+			break
+		}
+		prefix += fmt.Sprintf(";entries=%d;more=%t", len(objects), more)
+		if !more || len(objects) == 0 {
+			summaries = append(summaries, prefix+";stop=complete}")
+			break
+		}
+		next, err := clientPageCursor(objects, cursor)
+		if err != nil {
+			summaries = append(summaries, prefix+";stop=cursor_missing_or_repeated}")
+			break
+		}
+		suffix := ""
+		if page == 3 {
+			suffix = ";stop=diagnostic_limit"
+		}
+		summaries = append(summaries, prefix+fmt.Sprintf(";cursor_len=%d%s}", len(next), suffix))
+		cursor = next
+	}
+	return strings.Join(summaries, ";")
+}
+
 // Each pair uses identical fields and the same saved session, without refresh.
-func (d *BitQiu) diagnosticCompare(ctx context.Context, parentID string) (clientResponse, string) {
+func (d *BitQiu) diagnosticCompare(ctx context.Context, parentID, cursor string) (clientResponse, string) {
 	fields := url.Values{
 		"parent_id": {parentID}, "limit": {strconv.Itoa(d.pageSize())},
-		"sort": {""}, "desc": {d.orderDesc()}, "order": {d.orderType()}, "model": {"1"},
+		"sort": {cursor}, "desc": {d.orderDesc()}, "order": {d.orderType()}, "model": {"1"},
 		"access_token": {d.state.Token}, "open_id": {d.state.OpenID}, "user_id": {d.state.UserID},
 	}
 	goCtx, cancel := context.WithTimeout(ctx, 15*time.Second)

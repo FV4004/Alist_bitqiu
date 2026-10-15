@@ -146,7 +146,7 @@ func TestDiagnosticIncludesChildAndKeepsClientResultsSeparate(t *testing.T) {
 		t.Fatal("missing diagnostic summary")
 	}
 	msg := err.Error()
-	for _, part := range []string{"root{Go[HTTP=200,code=10200]", "child{id_source=dirId,legacy_id_diff=true;Go[HTTP=423", "wget[HTTP=200,code=10200"} {
+	for _, part := range []string{"root{Go[HTTP=200,code=10200]", "child{id_source=dirId,legacy_id_diff=true;page1{Go[HTTP=423", "wget[HTTP=200,code=10200"} {
 		if !strings.Contains(msg, part) {
 			t.Fatalf("missing child diagnostics: %s", msg)
 		}
@@ -167,5 +167,90 @@ func TestDiagnosticIncludesChildAndKeepsClientResultsSeparate(t *testing.T) {
 	entries, err := os.ReadDir(temp)
 	if err != nil || len(entries) != 0 {
 		t.Fatal("temporary files retained after child diagnostics")
+	}
+}
+
+func TestDiagnosticComparesSecondPageWithSameOpaqueCursor(t *testing.T) {
+	if _, err := exec.LookPath("wget"); err != nil {
+		t.Skip("wget not installed")
+	}
+	t.Setenv("no_proxy", "127.0.0.1,localhost")
+	const cursor = "private-cursor+&/%=目录"
+	var mu sync.Mutex
+	var forms []url.Values
+	d := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		mu.Lock()
+		forms = append(forms, r.PostForm)
+		mu.Unlock()
+		if r.Form.Get("parent_id") == "root" {
+			reply(w, 10200, map[string]interface{}{"hasNext": false, "data": []map[string]interface{}{{"resourceId": "private-child", "resourceType": 1, "name": "private-folder"}}})
+		} else if r.Form.Get("sort") == "" {
+			reply(w, 10200, map[string]interface{}{"hasNext": true, "data": []map[string]interface{}{{"resourceId": "private-file", "resourceType": 2, "name": "private-file-name", "sort": cursor}}})
+		} else {
+			if r.Form.Get("sort") != cursor {
+				t.Error("diagnostic modified the opaque cursor")
+			}
+			w.WriteHeader(423)
+		}
+	})
+	d.RootFolderID = "root"
+	d.state = clientState{Binding: d.binding(), Token: "private-token", OpenID: "open", UserID: "1"}
+	d.saveClient()
+	before := d.ClientState
+	d.LoginAction = "diagnose_http"
+	err := d.Init(context.Background())
+	if err == nil {
+		t.Fatal("missing diagnostic report")
+	}
+	msg := err.Error()
+	for _, part := range []string{"page1{Go[HTTP=200,code=10200]", "entries=1;more=true;cursor_len=", "page2{Go[HTTP=423", "wget[HTTP=423", "stop=request_failed"} {
+		if !strings.Contains(msg, part) {
+			t.Fatalf("missing page diagnostics: %s", msg)
+		}
+	}
+	for _, secret := range []string{cursor, "private-folder", "private-file", "private-token", "private-child"} {
+		if strings.Contains(msg, secret) {
+			t.Fatal("page diagnostics leaked private values")
+		}
+	}
+	if d.ClientState != before {
+		t.Fatal("page diagnostics changed the saved session")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(forms) != 6 {
+		t.Fatalf("unexpected request count: %d", len(forms))
+	}
+	for i := 0; i < len(forms); i += 2 {
+		if forms[i].Encode() != forms[i+1].Encode() {
+			t.Fatal("Go and wget used different page parameters")
+		}
+	}
+}
+
+func TestDiagnosticStopsAfterThreePages(t *testing.T) {
+	if _, err := exec.LookPath("wget"); err != nil {
+		t.Skip("wget not installed")
+	}
+	t.Setenv("no_proxy", "127.0.0.1,localhost")
+	var calls atomic.Int32
+	d := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		calls.Add(1)
+		if r.Form.Get("parent_id") == "root" {
+			reply(w, 10200, map[string]interface{}{"hasNext": false, "data": []map[string]interface{}{{"resourceId": "child", "resourceType": 1, "name": "Folder"}}})
+		} else {
+			next := r.Form.Get("sort") + "x"
+			reply(w, 10200, map[string]interface{}{"hasNext": true, "data": []map[string]interface{}{{"resourceId": "id-" + next, "resourceType": 2, "name": "File", "sort": next}}})
+		}
+	})
+	d.RootFolderID = "root"
+	d.state = clientState{Binding: d.binding(), Token: "token", OpenID: "open", UserID: "1"}
+	d.saveClient()
+	d.LoginAction = "diagnose_http"
+	err := d.Init(context.Background())
+	if err == nil || calls.Load() != 8 || !strings.Contains(err.Error(), "page3{") || !strings.Contains(err.Error(), "stop=diagnostic_limit") || strings.Contains(err.Error(), "page4{") {
+		t.Fatalf("diagnostic pagination was not bounded: calls=%d error=%v", calls.Load(), err)
 	}
 }
