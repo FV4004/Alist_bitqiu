@@ -239,7 +239,7 @@ func BitQiuNASControl(c *gin.Context) {
 		common.ErrorStrResp(c, "请选择需要操作的任务", 400)
 		return
 	}
-	if req.Scope == "all" && req.Restart {
+	if req.Restart && (req.Scope != "selected" || len(req.IDs) != 1) {
 		common.ErrorStrResp(c, "从头重新下载必须单独确认任务", 400)
 		return
 	}

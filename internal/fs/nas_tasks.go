@@ -358,6 +358,10 @@ func ControlNASDownload(ctx context.Context, id, action string, restart bool, us
 	}
 	if action == "cancel" && !active {
 		if err := removeNASPartial(n); err != nil {
+			n.mu.Lock()
+			n.record.Error = "传输已取消，但临时文件清理失败，请检查 NAS 挂载和权限"
+			n.mu.Unlock()
+			_ = SaveNASDownloads()
 			return false, err
 		}
 	}
@@ -413,6 +417,8 @@ func (t *CopyTask) runNAS() (err error) {
 		n.mu.Lock()
 		intent := n.record.State
 		switch {
+		case intent == "completed":
+			n.record.CompletionReason = "completed"
 		case intent == "pausing":
 			n.record.State = "paused"
 			n.record.CompletionReason = ""
@@ -441,7 +447,11 @@ func (t *CopyTask) runNAS() (err error) {
 		done := n.done
 		n.mu.Unlock()
 		if intent == "canceling" {
-			_ = removeNASPartial(n)
+			if cleanupErr := removeNASPartial(n); cleanupErr != nil {
+				n.mu.Lock()
+				n.record.Error = "传输已取消，但临时文件清理失败，请检查 NAS 挂载和权限"
+				n.mu.Unlock()
+			}
 		}
 		_ = SaveNASDownloads()
 		close(done)

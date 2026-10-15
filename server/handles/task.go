@@ -35,7 +35,7 @@ type TaskInfo struct {
 func getTaskInfo[T taskpkg.TaskExtensionInfo](task T) TaskInfo {
 	if controlled, ok := any(task).(interface{ NASView() (fs.NASView, bool) }); ok {
 		if v, ok := controlled.NASView(); ok {
-			state := tache.StatePending
+			var state tache.State = tache.StatePending
 			switch v.State {
 			case "downloading":
 				state = tache.StateRunning

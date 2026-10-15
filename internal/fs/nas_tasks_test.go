@@ -102,6 +102,9 @@ func TestNASDownloadLifecycle(t *testing.T) {
 				return
 			}
 			w.(http.Flusher).Flush()
+			if end == len(payload) {
+				return
+			}
 			select {
 			case <-r.Context().Done():
 				return
@@ -244,6 +247,8 @@ func TestNASDownloadLifecycle(t *testing.T) {
 		}
 	})
 	t.Run("all pause freezes waiting queue and starts obey worker limit", func(t *testing.T) {
+		nasEventually(t, func() bool { return active.Load() == 0 })
+		maxActive.Store(0)
 		a, b := makeTask("queue1"), makeTask("queue2")
 		if err = QueueNASDownloads([]NASRecord{a, b}, user); err != nil {
 			t.Fatal(err)

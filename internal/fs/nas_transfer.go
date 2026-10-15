@@ -202,7 +202,7 @@ func transferNAS(ctx context.Context, n *nasTask) error {
 	if err = file.Close(); err != nil {
 		return err
 	}
-	if err = publishNASFile(ctx, root, partial, r.Relative); err != nil {
+	if err = publishNASFile(ctx, root, partial, r.Relative, n); err != nil {
 		return err
 	}
 	if !obj.ModTime().IsZero() {
@@ -286,13 +286,23 @@ func openNASSource(ctx context.Context, link *model.Link, offset int64, r NASRec
 	}
 	return response.Body, total, validator, kind, nil
 }
-func publishNASFile(ctx context.Context, root *os.Root, partial, final string) error {
+func publishNASFile(ctx context.Context, root *os.Root, partial, final string, n *nasTask) error {
+	// The short final commit and control intent share a lock: once the complete
+	// file is published, a late cancel must skip it rather than mislabel success.
+	n.mu.Lock()
 	if err := ctx.Err(); err != nil {
+		n.mu.Unlock()
 		return err
 	}
-	if err := root.Link(partial, final); err == nil {
-		return root.Remove(partial)
-	} else if os.IsExist(err) {
+	linkErr := root.Link(partial, final)
+	if linkErr == nil {
+		n.record.State = "completed"
+		n.mu.Unlock()
+		cleanupNASPublished(root, partial, n)
+		return nil
+	}
+	n.mu.Unlock()
+	if os.IsExist(linkErr) {
 		return errors.New("目标文件已存在，未覆盖")
 	}
 	// Filesystems without hard links use exclusive creation, never an overwriting
@@ -323,8 +333,24 @@ func publishNASFile(ctx context.Context, root *os.Root, partial, final string) e
 	if err = out.Close(); err != nil {
 		return err
 	}
+	n.mu.Lock()
+	if err = ctx.Err(); err != nil {
+		n.mu.Unlock()
+		return err
+	}
 	complete = true
-	return root.Remove(partial)
+	n.record.State = "completed"
+	n.mu.Unlock()
+	cleanupNASPublished(root, partial, n)
+	return nil
+}
+
+func cleanupNASPublished(root *os.Root, partial string, n *nasTask) {
+	if err := root.Remove(partial); err != nil && !os.IsNotExist(err) {
+		n.mu.Lock()
+		n.record.Error = "文件已完整下载，但临时文件清理失败，请检查 NAS 权限"
+		n.mu.Unlock()
+	}
 }
 
 type nasContextReader struct {

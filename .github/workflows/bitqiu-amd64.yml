@@ -22,13 +22,15 @@ jobs:
           cache: true
       - name: Test BitQiu protocol and state transitions
         run: |
-          go test -race ./drivers/bitqiu
-          go test -race ./internal/op -run '^TestPendingLoginCanBeCreatedAndEdited$'
-          go test -race ./server/handles -run '^Test(BitQiuNASIntegration|NASTaskInfo)$'
-          go test -race ./internal/fs -run '^TestNAS'
-          go test -race ./internal/task
-          go test -race ./server/nasui
-          node --test scripts/nas-ui.test.cjs
+          task_test_status=0
+          go test -race ./drivers/bitqiu || task_test_status=1
+          go test -race ./internal/op -run '^TestPendingLoginCanBeCreatedAndEdited$' || task_test_status=1
+          go test -race ./server/handles -run '^Test(BitQiuNASIntegration|NASTaskInfo)$' || task_test_status=1
+          go test -race ./internal/fs -run '^TestNAS' || task_test_status=1
+          go test -race ./internal/task || task_test_status=1
+          go test -race ./server/nasui || task_test_status=1
+          node --test scripts/nas-ui.test.cjs || task_test_status=1
+          exit "$task_test_status"
       - name: Download matching official frontend
         run: |
           curl --fail --location --retry 3 https://github.com/AlistGo/alist-web/releases/download/3.65.0/dist.tar.gz -o /tmp/frontend.tar.gz
