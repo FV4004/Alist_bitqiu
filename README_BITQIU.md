@@ -95,3 +95,17 @@ GitHub Actions 自动测试、构建、发布 GHCR 镜像，以及提供可 `doc
 `diagnose_http` 现在先对比根目录，再对比根目录第一页中第一个文件夹，各用 Go 和 wget 读取一次。状态显示 `root{...}；child{id_source=...,legacy_id_diff=...;Go[...]；wget[...]}`。`id_source` 仅报告选用的字段名，`legacy_id_diff` 表示相对旧版选出的 ID 是否不同，不输出文件夹名称或 ID 值。根目录第一页没有文件夹时显示 `none_on_first_page`；根目录请求失败或元数据无法解析时跳过子目录并报告原因。不分页扫描、不尝试替换 Token、不重新登录或发短信。
 
 更新并重新创建容器后，先以 `login_action=none` 保存已有存储并强制刷新根目录，清除旧目录对象缓存，再打开子文件夹。如果仍报错，重新打开存储编辑页，选择 `diagnose_http` 保存，反馈完整的 root/child 脱敏结果。此版本尚未使用真实账号验证子目录 423 的根因。
+
+
+## 固定镜像版本
+
+GitHub Actions 为 GHCR 和 Docker Hub 同时发布 `latest` 和 `sha-<Git Commit 前12位>` 标签。两个仓库、两个标签来自同一份构建镜像。`latest` 随新发布更新；需要固定版本时使用该次构建的 SHA 标签。
+
+```sh
+# GHCR
+docker pull ghcr.io/fv4004/alist_bitqiu:sha-<提交号前12位>
+# Docker Hub：替换为仓库 Secret DOCKERHUB_USERNAME 对应的用户名
+docker pull <DockerHub用户名>/alist_bitqiu:sha-<提交号前12位>
+```
+
+在成功的 Actions 运行中查看 Commit，取前12位即可。此规则从本次工作流更新起生效，之前仅发布到 Docker Hub 的 latest 不会自动补出历史 SHA 标签。更换版本后仍需使用目标镜像重新创建容器，并保留原数据目录挂载。

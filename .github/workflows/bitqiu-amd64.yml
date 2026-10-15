@@ -55,12 +55,16 @@ jobs:
             -u "$DOCKERHUB_USERNAME" \
             --password-stdin
 
+          sha_tag="sha-${GITHUB_SHA::12}"
           docker tag \
-            ghcr.io/fv4004/alist_bitqiu:latest \
+            "ghcr.io/fv4004/alist_bitqiu:$sha_tag" \
+            "$DOCKERHUB_USERNAME/alist_bitqiu:$sha_tag"
+          docker tag \
+            "ghcr.io/fv4004/alist_bitqiu:$sha_tag" \
             "$DOCKERHUB_USERNAME/alist_bitqiu:latest"
 
-          docker push \
-            "$DOCKERHUB_USERNAME/alist_bitqiu:latest"
+          docker push "$DOCKERHUB_USERNAME/alist_bitqiu:$sha_tag"
+          docker push "$DOCKERHUB_USERNAME/alist_bitqiu:latest"
       - name: Export portable image and binary
         run: |
           mkdir -p release
