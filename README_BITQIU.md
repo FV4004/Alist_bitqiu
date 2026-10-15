@@ -50,7 +50,7 @@ docker compose -f compose.bitqiu.yml up -d
 
 ## 构建和验证
 
-需要 Go 1.25+、Docker，以及官方前端文件：
+需要 Go 1.25+、Docker、musl-gcc（Ubuntu/Debian 安装 musl-tools），以及官方前端文件。启用 CGO 并静态链接 musl，以支持上游的 SQLite 驱动：
 
 ```sh
 curl -fL https://github.com/AlistGo/alist-web/releases/download/3.65.0/dist.tar.gz -o /tmp/alist-dist.tar.gz

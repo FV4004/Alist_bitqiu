@@ -11,6 +11,7 @@ for attempt in $(seq 1 30); do
     exit 0
   fi
   if [ "$(docker inspect -f '{{.State.Running}}' "$name")" != true ]; then
+    docker logs "$name" 2>&1 | grep -viE "password|passwd|token|secret|admin" >&2 || true
     echo "AList exited during smoke test" >&2
     exit 1
   fi
