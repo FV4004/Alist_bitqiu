@@ -2,7 +2,7 @@ package handles
 
 import (
 	"github.com/alist-org/alist/v3/internal/model"
-	"github.com/alist-org/alist/v3/internal/task"
+	taskpkg "github.com/alist-org/alist/v3/internal/task"
 	"math"
 	"time"
 
@@ -15,20 +15,23 @@ import (
 )
 
 type TaskInfo struct {
-	ID          string      `json:"id"`
-	Name        string      `json:"name"`
-	Creator     string      `json:"creator"`
-	CreatorRole model.Roles `json:"creator_role"`
-	State       tache.State `json:"state"`
-	Status      string      `json:"status"`
-	Progress    float64     `json:"progress"`
-	StartTime   *time.Time  `json:"start_time"`
-	EndTime     *time.Time  `json:"end_time"`
-	TotalBytes  int64       `json:"total_bytes"`
-	Error       string      `json:"error"`
+	ID                  string      `json:"id"`
+	Name                string      `json:"name"`
+	Creator             string      `json:"creator"`
+	CreatorRole         model.Roles `json:"creator_role"`
+	State               tache.State `json:"state"`
+	Status              string      `json:"status"`
+	Progress            float64     `json:"progress"`
+	StartTime           *time.Time  `json:"start_time"`
+	EndTime             *time.Time  `json:"end_time"`
+	TotalBytes          int64       `json:"total_bytes"`
+	Error               string      `json:"error"`
+	TransferredBytes    int64       `json:"transferred_bytes"`
+	SpeedBytesPerSecond float64     `json:"speed_bytes_per_second"`
+	CompletionReason    string      `json:"completion_reason,omitempty"`
 }
 
-func getTaskInfo[T task.TaskExtensionInfo](task T) TaskInfo {
+func getTaskInfo[T taskpkg.TaskExtensionInfo](task T) TaskInfo {
 	errMsg := ""
 	if task.GetErr() != nil {
 		errMsg = task.GetErr().Error()
@@ -44,22 +47,50 @@ func getTaskInfo[T task.TaskExtensionInfo](task T) TaskInfo {
 		creatorName = task.GetCreator().Username
 		creatorRole = task.GetCreator().Role
 	}
+	var transfer taskpkg.TransferSnapshot
+	if measured, ok := any(task).(interface {
+		GetTransferSnapshot() taskpkg.TransferSnapshot
+	}); ok {
+		transfer = measured.GetTransferSnapshot()
+	}
+	reason := ""
+	switch task.GetState() {
+	case tache.StateSucceeded:
+		reason = "completed"
+	case tache.StateCanceled:
+		reason = "canceled"
+	case tache.StateFailed:
+		reason = taskpkg.CompletionReason(task.GetErr())
+		if reason == "completed" {
+			reason = "failed"
+		}
+	}
+	if reason != "" && transfer.CompletionReason != "" && transfer.CompletionReason != "completed" {
+		reason = transfer.CompletionReason
+	}
+	speed := float64(0)
+	if task.GetState() == tache.StateRunning {
+		speed = transfer.SpeedBytesPerSecond
+	}
 	return TaskInfo{
-		ID:          task.GetID(),
-		Name:        task.GetName(),
-		Creator:     creatorName,
-		CreatorRole: creatorRole,
-		State:       task.GetState(),
-		Status:      task.GetStatus(),
-		Progress:    progress,
-		StartTime:   task.GetStartTime(),
-		EndTime:     task.GetEndTime(),
-		TotalBytes:  task.GetTotalBytes(),
-		Error:       errMsg,
+		ID:                  task.GetID(),
+		Name:                task.GetName(),
+		Creator:             creatorName,
+		CreatorRole:         creatorRole,
+		State:               task.GetState(),
+		Status:              task.GetStatus(),
+		Progress:            progress,
+		StartTime:           task.GetStartTime(),
+		EndTime:             task.GetEndTime(),
+		TotalBytes:          task.GetTotalBytes(),
+		Error:               errMsg,
+		TransferredBytes:    transfer.TransferredBytes,
+		SpeedBytesPerSecond: speed,
+		CompletionReason:    reason,
 	}
 }
 
-func getTaskInfos[T task.TaskExtensionInfo](tasks []T) []TaskInfo {
+func getTaskInfos[T taskpkg.TaskExtensionInfo](tasks []T) []TaskInfo {
 	return utils.MustSliceConvert(tasks, getTaskInfo[T])
 }
 
@@ -75,7 +106,7 @@ func getUserInfo(c *gin.Context) (bool, uint, bool) {
 	}
 }
 
-func getTargetedHandler[T task.TaskExtensionInfo](manager task.Manager[T], callback func(c *gin.Context, task T)) gin.HandlerFunc {
+func getTargetedHandler[T taskpkg.TaskExtensionInfo](manager taskpkg.Manager[T], callback func(c *gin.Context, task T)) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		isAdmin, uid, ok := getUserInfo(c)
 		if !ok {
@@ -97,7 +128,7 @@ func getTargetedHandler[T task.TaskExtensionInfo](manager task.Manager[T], callb
 	}
 }
 
-func getBatchHandler[T task.TaskExtensionInfo](manager task.Manager[T], callback func(task T)) gin.HandlerFunc {
+func getBatchHandler[T taskpkg.TaskExtensionInfo](manager taskpkg.Manager[T], callback func(task T)) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		isAdmin, uid, ok := getUserInfo(c)
 		if !ok {
@@ -122,7 +153,7 @@ func getBatchHandler[T task.TaskExtensionInfo](manager task.Manager[T], callback
 	}
 }
 
-func taskRoute[T task.TaskExtensionInfo](g *gin.RouterGroup, manager task.Manager[T]) {
+func taskRoute[T taskpkg.TaskExtensionInfo](g *gin.RouterGroup, manager taskpkg.Manager[T]) {
 	g.GET("/undone", func(c *gin.Context) {
 		isAdmin, uid, ok := getUserInfo(c)
 		if !ok {

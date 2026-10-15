@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/alist-org/alist/v3/drivers/local"
 	"github.com/alist-org/alist/v3/internal/conf"
@@ -82,6 +83,16 @@ func TestBitQiuNASIntegration(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(source, "folder", "nested", "child.txt"), []byte("nested fixture"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	stamp := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 237; i++ {
+		at := stamp.Add(time.Duration(i+1) * time.Minute)
+		if err := os.Chtimes(filepath.Join(source, fmt.Sprintf("file-%03d.txt", i)), at, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chtimes(filepath.Join(source, "folder"), stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
 	for _, cfg := range []struct{ driver, mount, root string }{{"BitQiu", "/cloud", source}, {"Local", "/nas", dest}} {
 		addition, _ := json.Marshal(map[string]any{"root_folder_path": cfg.root, "show_hidden": true, "mkdir_perm": "755"})
 		if _, err := op.CreateStorage(context.Background(), model.Storage{Driver: cfg.driver, MountPath: cfg.mount, Addition: string(addition)}); err != nil {
@@ -149,6 +160,28 @@ func TestBitQiuNASIntegration(t *testing.T) {
 			t.Fatalf("unpaged browser lost entries: %d", len(data.Content))
 		}
 	})
+	t.Run("sort whole directory before pagination", func(t *testing.T) {
+		for _, page := range []int{1, 3} {
+			result := invoke(FsList, map[string]any{"path": "/cloud", "page": page, "per_page": 100, "order_by": "modified", "order_direction": "desc"}, true)
+			requireOK(t, result)
+			var data FsListResp
+			_ = json.Unmarshal(result["data"], &data)
+			want := fmt.Sprintf("file-%03d.txt", 237-1-(page-1)*100)
+			if data.Content[0].Name != want {
+				t.Fatalf("page %d: %s != %s", page, data.Content[0].Name, want)
+			}
+		}
+		result := invoke(FsList, map[string]any{"path": "/cloud", "page": 1, "per_page": 100, "order_by": "modified", "order_direction": "asc"}, true)
+		requireOK(t, result)
+		var data FsListResp
+		_ = json.Unmarshal(result["data"], &data)
+		if data.Content[0].Name != "folder" {
+			t.Fatal("oldest-first order ignored")
+		}
+		if code(invoke(FsList, map[string]any{"path": "/cloud", "order_by": "invalid"}, true)) == 200 {
+			t.Fatal("accepted invalid sort")
+		}
+	})
 	t.Run("visual directories and confinement", func(t *testing.T) {
 		requireOK(t, invoke(BitQiuNASMkdir, map[string]string{"path": "/nas", "name": "Movies"}, true))
 		result := invoke(BitQiuNASDirs, map[string]string{"path": "/nas"}, true)
@@ -194,6 +227,17 @@ func TestBitQiuNASIntegration(t *testing.T) {
 			if !progressed {
 				break
 			}
+		}
+		var transferred int64
+		for _, task := range fs.CopyTaskManager.GetAll() {
+			snapshot := task.GetTransferSnapshot()
+			transferred += snapshot.TransferredBytes
+			if snapshot.CompletionReason != "completed" {
+				t.Fatalf("bad completed outcome: %+v", snapshot)
+			}
+		}
+		if transferred != int64(len("NAS download fixture")+len("nested fixture")) {
+			t.Fatalf("wrong real stream bytes: %d", transferred)
 		}
 		for name, want := range map[string]string{"file-000.txt": "NAS download fixture", "folder/nested/child.txt": "nested fixture"} {
 			data, err := os.ReadFile(filepath.Join(dest, "Movies", name))

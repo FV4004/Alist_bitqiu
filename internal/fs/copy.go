@@ -21,14 +21,15 @@ import (
 
 type CopyTask struct {
 	task.TaskExtension
-	Status       string        `json:"-"` //don't save status to save space
-	SrcObjPath   string        `json:"src_path"`
-	DstDirPath   string        `json:"dst_path"`
-	srcStorage   driver.Driver `json:"-"`
-	dstStorage   driver.Driver `json:"-"`
-	SrcStorageMp string        `json:"src_storage_mp"`
-	DstStorageMp string        `json:"dst_storage_mp"`
-	SkipExisting bool          `json:"skip_existing"`
+	Status       string             `json:"-"` //don't save status to save space
+	SrcObjPath   string             `json:"src_path"`
+	DstDirPath   string             `json:"dst_path"`
+	srcStorage   driver.Driver      `json:"-"`
+	dstStorage   driver.Driver      `json:"-"`
+	SrcStorageMp string             `json:"src_storage_mp"`
+	DstStorageMp string             `json:"dst_storage_mp"`
+	SkipExisting bool               `json:"skip_existing"`
+	Transfer     task.TransferMeter `json:"transfer_metrics"`
 }
 
 func (t *CopyTask) GetName() string {
@@ -39,12 +40,23 @@ func (t *CopyTask) GetStatus() string {
 	return t.Status
 }
 
-func (t *CopyTask) Run() error {
+func (t *CopyTask) GetTransferSnapshot() task.TransferSnapshot {
+	return t.Transfer.Snapshot(time.Now())
+}
+func (t *CopyTask) Cancel() { t.Transfer.CancelRequested(); t.TaskExtension.Cancel() }
+
+func (t *CopyTask) Run() (err error) {
 	t.ReinitCtx()
+	t.Transfer.Start(time.Now())
 	t.ClearEndTime()
 	t.SetStartTime(time.Now())
-	defer func() { t.SetEndTime(time.Now()) }()
-	var err error
+	defer func() {
+		if err == nil && t.Ctx().Err() != nil {
+			err = t.Ctx().Err()
+		}
+		t.Transfer.Stop(err)
+		t.SetEndTime(time.Now())
+	}()
 	if t.srcStorage == nil {
 		t.srcStorage, err = op.GetStorageByMountPath(t.SrcStorageMp)
 	}
@@ -201,5 +213,22 @@ func copyFileBetween2Storages(tsk *CopyTask, srcStorage, dstStorage driver.Drive
 	if err != nil {
 		return errors.WithMessagef(err, "failed get [%s] stream", srcFilePath)
 	}
-	return op.Put(tsk.Ctx(), dstStorage, dstDirPath, ss, tsk.SetProgress, true)
+	var input model.FileStreamer = ss
+	if dstStorage.Config().Name == "Local" {
+		input = &meteredCopyStream{FileStreamer: ss, meter: &tsk.Transfer}
+	}
+	return op.Put(tsk.Ctx(), dstStorage, dstDirPath, input, tsk.SetProgress, true)
+}
+
+// NAS downloads stream into Local.Put through Read, so this counts actual
+// bytes consumed rather than estimating speed from rounded progress values.
+type meteredCopyStream struct {
+	model.FileStreamer
+	meter *task.TransferMeter
+}
+
+func (s *meteredCopyStream) Read(p []byte) (int, error) {
+	n, err := s.FileStreamer.Read(p)
+	s.meter.Add(n, time.Now())
+	return n, err
 }

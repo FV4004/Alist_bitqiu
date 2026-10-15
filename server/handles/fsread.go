@@ -3,6 +3,7 @@ package handles
 import (
 	"fmt"
 	stdpath "path"
+	"sort"
 	"strings"
 	"time"
 
@@ -21,9 +22,11 @@ import (
 
 type ListReq struct {
 	model.PageReq
-	Path     string `json:"path" form:"path"`
-	Password string `json:"password" form:"password"`
-	Refresh  bool   `json:"refresh"`
+	Path           string `json:"path" form:"path"`
+	Password       string `json:"password" form:"password"`
+	Refresh        bool   `json:"refresh"`
+	OrderBy        string `json:"order_by"`
+	OrderDirection string `json:"order_direction"`
 }
 
 type DirReq struct {
@@ -140,6 +143,10 @@ func FsList(c *gin.Context) {
 		if common.CanReadPathByRole(user, childPath) {
 			filtered = append(filtered, obj)
 		}
+	}
+	if err := sortRequestedObjects(filtered, req.OrderBy, req.OrderDirection); err != nil {
+		common.ErrorResp(c, err, 400)
+		return
 	}
 	total, pageObjs := pagination(filtered, &req.PageReq)
 	respContent := toObjsResp(pageObjs, reqPath, isEncrypt(meta, reqPath))
@@ -548,4 +555,49 @@ func FsOther(c *gin.Context) {
 		return
 	}
 	common.SuccessResp(c, res)
+}
+
+// Sort the permission-filtered copy before pagination; the shared driver cache
+// and other browsers' listing order must not be mutated.
+func sortRequestedObjects(objects []model.Obj, by, direction string) error {
+	if by == "" {
+		return nil
+	}
+	if by != "modified" && by != "name" && by != "size" {
+		return fmt.Errorf("unsupported order_by")
+	}
+	if direction == "" {
+		direction = "asc"
+	}
+	if direction != "asc" && direction != "desc" {
+		return fmt.Errorf("unsupported order_direction")
+	}
+	sort.SliceStable(objects, func(i, j int) bool {
+		a, b := objects[i], objects[j]
+		cmp := 0
+		switch by {
+		case "modified":
+			if a.ModTime().Before(b.ModTime()) {
+				cmp = -1
+			} else if a.ModTime().After(b.ModTime()) {
+				cmp = 1
+			}
+		case "size":
+			if a.GetSize() < b.GetSize() {
+				cmp = -1
+			} else if a.GetSize() > b.GetSize() {
+				cmp = 1
+			}
+		case "name":
+			cmp = strings.Compare(strings.ToLower(a.GetName()), strings.ToLower(b.GetName()))
+		}
+		if cmp == 0 {
+			return a.GetName() < b.GetName()
+		}
+		if direction == "desc" {
+			return cmp > 0
+		}
+		return cmp < 0
+	})
+	return nil
 }
