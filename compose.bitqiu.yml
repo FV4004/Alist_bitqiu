@@ -1,0 +1,16 @@
+services:
+  alist:
+    image: ghcr.io/fv4004/alist_bitqiu:latest
+    platform: linux/amd64
+    container_name: alist-bitqiu
+    restart: unless-stopped
+    ports:
+      - "5244:5244"
+      - "5245:5245"
+    volumes:
+      - ./data:/opt/alist/data
+    environment:
+      PUID: "0"
+      PGID: "0"
+      UMASK: "022"
+      TZ: Asia/Shanghai

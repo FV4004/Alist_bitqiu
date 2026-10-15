@@ -1,0 +1,65 @@
+name: Build and publish BitQiu amd64
+on:
+  push:
+    branches: [main]
+    tags: ['v*-bitqiu.*']
+  workflow_dispatch:
+permissions:
+  contents: write
+  packages: write
+concurrency:
+  group: bitqiu-amd64-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test BitQiu protocol and state transitions
+        run: go test -race ./drivers/bitqiu
+      - name: Download matching official frontend
+        run: |
+          curl --fail --location --retry 3 https://github.com/AlistGo/alist-web/releases/download/3.65.0/dist.tar.gz -o /tmp/frontend.tar.gz
+          tar -xzf /tmp/frontend.tar.gz -C public
+      - name: Build linux amd64 binary
+        run: bash scripts/build-bitqiu.sh
+      - name: Build image using pinned official runtime
+        run: |
+          docker pull --platform linux/amd64 xhofe/alist@sha256:499313cdb00ec53f60d9f00167df4ea737ca7f94f0d822673330f55bff8c9bfc
+          docker build --platform linux/amd64 -f Dockerfile.bitqiu --build-arg VCS_REF="$GITHUB_SHA" -t ghcr.io/fv4004/alist_bitqiu:latest -t ghcr.io/fv4004/alist_bitqiu:sha-${GITHUB_SHA::12} .
+      - name: Smoke test amd64 image
+        run: bash scripts/smoke-bitqiu.sh ghcr.io/fv4004/alist_bitqiu:latest
+      - name: Publish GHCR image
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker push ghcr.io/fv4004/alist_bitqiu:sha-${GITHUB_SHA::12}
+          docker push ghcr.io/fv4004/alist_bitqiu:latest
+      - name: Export portable image and binary
+        run: |
+          mkdir -p release
+          docker save ghcr.io/fv4004/alist_bitqiu:latest | gzip > release/alist-bitqiu-linux-amd64-image.tar.gz
+          tar -czf release/alist-bitqiu-linux-amd64-binary.tar.gz -C build alist
+          (cd release && sha256sum *.tar.gz > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: alist-bitqiu-linux-amd64
+          path: release/*
+          retention-days: 30
+      - name: Publish downloadable GitHub Release
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          release_tag="build-${GITHUB_SHA::12}"
+          if gh release view "$release_tag" >/dev/null 2>&1; then
+            gh release upload "$release_tag" release/* --clobber
+          else
+            gh release create "$release_tag" release/* --target "$GITHUB_SHA" --title "AList BitQiu amd64 ${GITHUB_SHA::12}" --notes-file docs/RELEASE.md
+          fi
