@@ -8,6 +8,8 @@ docker run -d --network none --name "$name" --entrypoint /opt/alist/alist "$imag
 for attempt in $(seq 1 30); do
   if docker exec "$name" sh -c 'wget -qO /tmp/alist-ping http://127.0.0.1:5244/ping && test "$(cat /tmp/alist-ping)" = pong'; then
     docker exec "$name" sh -c 'wget -qO /tmp/alist-ui http://127.0.0.1:5244/ && grep -qi "<html" /tmp/alist-ui'
+    docker exec "$name" sh -c 'wget -qO /tmp/alist-nav http://127.0.0.1:5244/bitqiu-assets/nav.js && test -s /tmp/alist-nav && grep -q "bitqiu-assets/nav.js" /tmp/alist-ui'
+    docker exec "$name" sh -c 'wget -qO /tmp/alist-nas http://127.0.0.1:5244/@nas && grep -q "target-folders" /tmp/alist-nas'
     exit 0
   fi
   if [ "$(docker inspect -f '{{.State.Running}}' "$name")" != true ]; then

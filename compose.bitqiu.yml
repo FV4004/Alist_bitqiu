@@ -9,6 +9,8 @@ services:
       - "5245:5245"
     volumes:
       - ./data:/opt/alist/data
+      # Replace ./downloads with the NAS folder chosen in the Docker interface.
+      - ./downloads:/downloads
     environment:
       PUID: "0"
       PGID: "0"

@@ -24,6 +24,9 @@ jobs:
         run: |
           go test -race ./drivers/bitqiu
           go test -race ./internal/op -run '^TestPendingLoginCanBeCreatedAndEdited$'
+          go test -race ./server/handles -run '^TestBitQiuNASIntegration$'
+          go test -race ./server/nasui
+          node --test scripts/nas-ui.test.cjs
       - name: Download matching official frontend
         run: |
           curl --fail --location --retry 3 https://github.com/AlistGo/alist-web/releases/download/3.65.0/dist.tar.gz -o /tmp/frontend.tar.gz

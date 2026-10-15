@@ -146,6 +146,10 @@ func FsCopy(c *gin.Context) {
 		common.ErrorResp(c, err, 400)
 		return
 	}
+	fsCopy(c, req)
+}
+
+func fsCopy(c *gin.Context, req MoveCopyReq) {
 	if len(req.Names) == 0 {
 		common.ErrorStrResp(c, "Empty file names", 400)
 		return

@@ -10,6 +10,7 @@ import (
 	"github.com/alist-org/alist/v3/server/common"
 	"github.com/alist-org/alist/v3/server/handles"
 	"github.com/alist-org/alist/v3/server/middlewares"
+	"github.com/alist-org/alist/v3/server/nasui"
 	"github.com/alist-org/alist/v3/server/static"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -122,12 +123,20 @@ func Init(e *gin.Engine) {
 	if flags.Debug || flags.Dev {
 		debug(g.Group("/debug"))
 	}
+	nasui.Register(g)
 	static.Static(g, func(handlers ...gin.HandlerFunc) {
 		e.NoRoute(handlers...)
 	})
 }
 
 func admin(g *gin.RouterGroup) {
+	nas := g.Group("/bitqiu/nas")
+	nas.GET("/targets", handles.BitQiuNASTargets)
+	nas.POST("/enable", handles.BitQiuNASEnable)
+	nas.POST("/dirs", handles.BitQiuNASDirs)
+	nas.POST("/mkdir", handles.BitQiuNASMkdir)
+	nas.POST("/download", handles.BitQiuNASDownload)
+
 	meta := g.Group("/meta")
 	meta.GET("/list", handles.ListMetas)
 	meta.GET("/get", handles.GetMeta)

@@ -142,6 +142,9 @@ func copyBetween2Storages(t *CopyTask, srcStorage, dstStorage driver.Driver, src
 		if err != nil {
 			return errors.WithMessagef(err, "failed list src [%s] objs", srcObjPath)
 		}
+		if len(objs) == 0 {
+			return op.MakeDir(t.Ctx(), dstStorage, stdpath.Join(dstDirPath, srcObj.GetName()))
+		}
 		for _, obj := range objs {
 			if utils.IsCanceled(t.Ctx()) {
 				return nil

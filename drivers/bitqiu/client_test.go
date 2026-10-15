@@ -508,3 +508,27 @@ func TestListingHTTP423ReportsSecondPageWithoutLeakingCursor(t *testing.T) {
 		}
 	}
 }
+
+func TestClientPageNextMarkerTypes(t *testing.T) {
+	for _, marker := range []string{"true", "1", `"1"`, `"true"`, `" true "`} {
+		raw := json.RawMessage(`{"data":[{"resourceId":"file","name":"file","sort":"next"}],"hasNext":` + marker + `}`)
+		objs, more, err := parseClientPage(raw, "root", "/", 24)
+		if err != nil || !more || len(objs) != 1 {
+			t.Fatalf("marker %s: count=%d more=%v err=%v", marker, len(objs), more, err)
+		}
+	}
+	for _, marker := range []string{"false", "0", `"0"`, `"false"`} {
+		_, more, err := parseClientPage(json.RawMessage(`{"data":[],"has_next":`+marker+`}`), "root", "/", 24)
+		if err != nil || more {
+			t.Fatalf("marker %s: more=%v err=%v", marker, more, err)
+		}
+	}
+	if _, _, err := parseClientPage(json.RawMessage(`{"data":[],"hasNext":"unknown"}`), "root", "/", 24); err == nil {
+		t.Fatal("invalid marker silently truncated listing")
+	}
+	// Some servers return more records than the requested limit.
+	_, more, err := parseClientPage(json.RawMessage(` [{"resourceId":"a","name":"a"},{"resourceId":"b","name":"b"}] `), "root", "/", 1)
+	if err != nil || !more {
+		t.Fatal("oversized page truncated listing", err)
+	}
+}

@@ -93,6 +93,11 @@ func FsList(c *gin.Context) {
 		common.ErrorResp(c, err, 400)
 		return
 	}
+	// Legacy browsers use zero/omitted per_page for an unpaginated listing.
+	// Explicit positive page sizes retain server pagination.
+	if req.PerPage == 0 {
+		req.Page, req.PerPage = 1, AllPerPage
+	}
 	effPage, effPerPage := normalizeListPage(req.Page, req.PerPage)
 	req.Page = effPage
 	req.PerPage = effPerPage

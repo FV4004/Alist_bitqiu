@@ -13,6 +13,7 @@ import (
 	"github.com/alist-org/alist/v3/internal/setting"
 	"github.com/alist-org/alist/v3/pkg/utils"
 	"github.com/alist-org/alist/v3/public"
+	"github.com/alist-org/alist/v3/server/nasui"
 	"github.com/gin-gonic/gin"
 )
 
@@ -72,6 +73,7 @@ func UpdateIndex() {
 	for k, v := range replaceMap1 {
 		conf.ManageHtml = strings.Replace(conf.ManageHtml, k, v, 1)
 	}
+	conf.ManageHtml = strings.Replace(conf.ManageHtml, "</head>", nasui.NavigationScript(conf.URL.Path)+"</head>", 1)
 	conf.IndexHtml = conf.ManageHtml
 	replaceMap2 := map[string]string{
 		"<!-- customize head -->": customizeHead,

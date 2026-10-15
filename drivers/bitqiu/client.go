@@ -489,6 +489,7 @@ func clientObject(raw json.RawMessage, parentID, parentPath string, folder bool)
 	return o, nil
 }
 func parseClientPage(raw json.RawMessage, parentID, parentPath string, limit int) ([]model.Obj, bool, error) {
+	raw = bytes.TrimSpace(raw)
 	var records []json.RawMessage
 	var objs []model.Obj
 	if len(raw) > 0 && raw[0] == '[' {
@@ -502,7 +503,7 @@ func parseClientPage(raw json.RawMessage, parentID, parentPath string, limit int
 			}
 			objs = append(objs, o)
 		}
-		return objs, len(records) == limit, nil
+		return objs, len(records) >= limit, nil
 	}
 	m, err := decodeObject(raw)
 	if err != nil {
@@ -544,9 +545,13 @@ func parseClientPage(raw json.RawMessage, parentID, parentPath string, limit int
 			if json.Unmarshal(v, &next) == nil {
 				return objs, next, nil
 			}
+			if next, err := strconv.ParseBool(strings.TrimSpace(rawText(v))); err == nil {
+				return objs, next, nil
+			}
+			return nil, false, errors.New("BitQiu 目录返回无效的下一页标记，已停止以避免遗漏文件")
 		}
 	}
-	return objs, count == limit, nil
+	return objs, count >= limit, nil
 }
 
 // Shared by normal listing and diagnostics so they follow the same cursor path.
