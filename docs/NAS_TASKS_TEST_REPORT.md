@@ -37,7 +37,7 @@
 | TEST-11 | 浏览器刷新保持后端状态；数据库记录加载恢复历史，等待/下载中恢复为暂停，保留进度。 |
 | TEST-12 | HTTP 503 失败显示且可重试；无 Range、错误偏移、实体/大小变化防止错误拼接；历史超时原因展示。 |
 
-本地结果：NAS 页面浏览器验收已通过根路径和 `/alist` 路径前缀，覆盖桌面和 390px 手机布局；无页面异常及横向溢出。`internal/task` race 测试及导航 Node 测试通过。完整 Go 测试因当前云环境无法下载部分依赖，交由 GitHub Actions 执行；工作流在协议、后端、race、官方登录和浏览器测试全部通过后才构建和发布镜像。对应提交的最终结果以 [Actions](https://github.com/FV4004/Alist_bitqiu/actions/workflows/bitqiu-amd64.yml) 为准。
+本地结果：NAS 页面浏览器验收已通过根路径和 `/alist` 路径前缀，覆盖桌面和 390px 手机布局；无页面异常及横向溢出。`internal/task` race 测试及导航 Node 测试通过。当前云环境无法下载部分 Go 依赖，完整后端测试已在 [GitHub Actions](https://github.com/FV4004/Alist_bitqiu/actions/runs/38766799016) 通过：BitQiu 协议、NAS 集成、真实 HTTP 传输/续传/取消/并发、任务记录恢复、大小元数据和全部相关 race 检查均通过。官方登录和 NAS 浏览器回归本地已通过；同样列入发布门禁。工作流在这些检查全部通过后才构建并执行镜像启动检查，随后双仓库发布。最终对应提交的完整构建结果以 [Actions](https://github.com/FV4004/Alist_bitqiu/actions/workflows/bitqiu-amd64.yml) 为准。
 
 验证命令与 CI 保持一致：
 
@@ -65,6 +65,6 @@ python scripts/test-nas-browser.py
 
 ## 数据和部署兼容
 
-使用已有 `task_items` 表的 `bitqiu_nas_v1` 项，不改数据库结构、不加配置、不改变最终文件名和 NAS 路径选择。新记录不包含密码、Token 或临时下载 URL。容器升级保留原数据和 `/downloads` 挂载；不要删除任务临时文件。
+使用已有 `task_items` 表的 `bitqiu_nas_v1` 项，不改数据库结构、不加配置、不改变最终文件名和 NAS 路径选择。文件创建沿用 Local 写入的 0666 与容器 umask 组合，保留 NAS 的正常读取规则。新记录不包含密码、Token 或临时下载 URL。容器升级保留原数据和 `/downloads` 挂载；不要删除任务临时文件。
 
 旧式任务继续由原 AList 任务管理查看、重试和取消，不自动迁移到新状态模型。建议完成旧任务后升级。重启后增强任务暂停，手动开始继续；数据库记录损坏时保护原记录并暂停增强任务写入，主 AList 仍可启动。原 HTTP API 保留，新增管理员 `/api/admin/bitqiu/nas/stats`、`tasks`、`control` 接口；普通复制和原并发设置继续工作。

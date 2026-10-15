@@ -90,7 +90,7 @@ func transferNAS(ctx context.Context, n *nasTask) error {
 	if info, e := root.Lstat(partial); e == nil && (!info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0) {
 		return errors.New("临时文件类型异常，已停止")
 	}
-	file, err := root.OpenFile(partial, os.O_CREATE|os.O_RDWR, 0644)
+	file, err := root.OpenFile(partial, os.O_CREATE|os.O_RDWR, 0666)
 	if err != nil {
 		return err
 	}
@@ -312,7 +312,7 @@ func publishNASFile(ctx context.Context, root *os.Root, partial, final string, n
 		return err
 	}
 	defer in.Close()
-	out, err := root.OpenFile(final, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	out, err := root.OpenFile(final, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0666)
 	if err != nil {
 		return err
 	}
