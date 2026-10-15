@@ -146,3 +146,9 @@ Windows 模式新增 `page_interval_ms`（毫秒，默认 1000），控制正常
 该页面仅管理员可用，不会向浏览器返回 BitQiu 密码、Addition 或客户端会话。下载复用 AList 后台复制任务，文件夹递归展开为子任务；同名目标在提交前拒绝，请选择新的空目录。挂载需有写入权限，实际权限取决于容器运行用户和极空间共享文件夹权限。新启用的 `/NAS下载` 自动加上继承到子目录的随机元信息密码，管理员可直接访问，访客不能浏览；已有本地存储沿用原访问设置。实际 BitQiu 账号的下载权限仍由服务端决定。
 
 页面浏览器回归：安装 Python Playwright 和 Chromium 后运行 `python scripts/test-nas-browser.py`，可用 `CHROMIUM_PATH` 指定浏览器；测试使用模拟接口，不需要网盘账号。
+
+## 登录白屏修复（v3.65.0-bitqiu.9）
+
+v3.65.0-bitqiu.8 的 NAS 导航同步脚本存在加载时序问题，某些缓存和网络时序下可能使登录页白屏并停在 Loading。v3.65.0-bitqiu.9 将该脚本改为异步加载，保留目录分页与 NAS 下载功能。更新容器后强制刷新网页；仍需保留原 `/opt/alist/data` 挂载。
+
+开发验证：下载匹配的官方前端到 `public/dist`，安装 Python Playwright 和 Chromium 后运行 `python scripts/test-alist-login.py`；可通过 `CHROMIUM_PATH` 指定浏览器，`--demonstrate-regression` 可复现旧逻辑。CI 在构建镜像前执行这些登录页检查。

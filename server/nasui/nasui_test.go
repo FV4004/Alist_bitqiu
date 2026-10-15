@@ -25,6 +25,9 @@ func TestNASAssetsAndBasePath(t *testing.T) {
 	if got := NavigationScript("/alist/"); !strings.Contains(got, `src="/alist/bitqiu-assets/nav.js"`) {
 		t.Fatal(got)
 	}
+	if !strings.Contains(NavigationScript(""), "<script async ") {
+		t.Fatal("navigation script must not block parsing the official frontend's root element")
+	}
 	if strings.Contains(NavigationScript(`/"><img src=x>`), `<img`) {
 		t.Fatal("unescaped script path")
 	}

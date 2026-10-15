@@ -12,7 +12,10 @@ import (
 var assets embed.FS
 
 func NavigationScript(base string) string {
-	return `<script src="` + html.EscapeString(strings.TrimSuffix(base, "/")+"/bitqiu-assets/nav.js") + `"></script>`
+	// The official frontend inserts its module dynamically (async). A blocking
+	// script in <head> can hold the parser there while that module starts and
+	// tries to render into #root, which does not exist until <body> is parsed.
+	return `<script async src="` + html.EscapeString(strings.TrimSuffix(base, "/")+"/bitqiu-assets/nav.js") + `"></script>`
 }
 func Register(g *gin.RouterGroup) {
 	g.GET("/@nas", func(c *gin.Context) {

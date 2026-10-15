@@ -16,7 +16,7 @@
     let anchor=document.getElementById('alist-nas-download');
     if(token!==checkedToken){anchor?.remove();anchor=null;allowed=false;}
     if(!token){checkedToken='';return;}
-    if(checkedToken!==token&&!pending){pending=true;checkedToken=token;fetch(base+'/api/me',{headers:{Authorization:token}}).then(r=>r.json()).then(r=>{if(checkedToken===token)allowed=r.code===200&&r.data?.role?.includes(2);}).catch(()=>{checkedToken='';}).finally(()=>{pending=false;mount();});return;}
+    if(checkedToken!==token&&!pending){pending=true;checkedToken=token;fetch(base+'/api/me',{headers:{Authorization:token}}).then(r=>r.json()).then(r=>{if(checkedToken===token)allowed=r.code===200&&r.data?.role?.includes(2);}).catch(()=>{checkedToken='';}).finally(()=>{pending=false;if(allowed)mount();});return;}
     if(!allowed)return;
     if(anchor){anchor.href=destination();return;}
     const a=document.createElement('a');a.id='alist-nas-download';a.textContent='↓ NAS 下载';a.href=destination();a.onclick=()=>{a.href=destination();};a.title='选择网盘文件并下载到 NAS';a.style.cssText='position:fixed;right:18px;bottom:18px;z-index:9999;padding:10px 16px;border-radius:24px;background:#136b67;color:white;font:600 14px system-ui;text-decoration:none;box-shadow:0 3px 15px #0002';document.body.append(a);
