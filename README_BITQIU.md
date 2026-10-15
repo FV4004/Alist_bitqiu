@@ -152,3 +152,7 @@ Windows 模式新增 `page_interval_ms`（毫秒，默认 1000），控制正常
 v3.65.0-bitqiu.8 的 NAS 导航同步脚本存在加载时序问题，某些缓存和网络时序下可能使登录页白屏并停在 Loading。v3.65.0-bitqiu.9 将该脚本改为异步加载，保留目录分页与 NAS 下载功能。更新容器后强制刷新网页；仍需保留原 `/opt/alist/data` 挂载。
 
 开发验证：下载匹配的官方前端到 `public/dist`，安装 Python Playwright 和 Chromium 后运行 `python scripts/test-alist-login.py`；可通过 `CHROMIUM_PATH` 指定浏览器，`--demonstrate-regression` 可复现旧逻辑。CI 在构建镜像前执行这些登录页检查。
+
+## NAS 下载入口跳转修复（v3.65.0-bitqiu.10）
+
+修复点击右下角 NAS 下载按钮出现 `storage not found; rawPath: /@nas` 的问题；该路径是独立页面，无需添加同名存储。入口使用完整页面导航，避免 AList 前端路由将其当作网盘目录。更新后强制刷新网页。旧版临时可在浏览器地址栏直接输入完整的 `http://NAS地址:5244/@nas` 后回车；有网站路径前缀时一并保留。

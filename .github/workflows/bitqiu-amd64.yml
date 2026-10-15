@@ -34,7 +34,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Test official login frontend with slow or unavailable NAS navigation
+      - name: Test official login and navigation to NAS downloads
         run: |
           python -m pip install playwright==1.62.0
           python -m playwright install --with-deps chromium
