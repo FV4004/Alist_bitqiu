@@ -91,7 +91,7 @@ func (d *BitQiu) clearChallenge() {
 	d.state.SMSAttemptedAt = 0
 }
 func (d *BitQiu) pending() error {
-	return errors.New("BitQiu 需要新设备短信验证：在存储配置选择 send_sms 保存，收到短信后填写 sms_code 并选择 verify_sms 保存；请先重新打开编辑页以加载已保存状态")
+	return fmt.Errorf("%w：BitQiu 需要新设备短信验证；请重新打开已创建的存储编辑页，收到短信后填写 sms_code 并保存；未收到可选择 send_sms 重发", errs.DriverInitPending)
 }
 func (d *BitQiu) initWindows(ctx context.Context) error {
 	d.clientMu.Lock()
@@ -143,6 +143,14 @@ func (d *BitQiu) initWindows(ctx context.Context) error {
 			return errors.New("BitQiu 验证会话已过期，请重新登录并发送验证码")
 		}
 	}
+	// A new driver must start password login before it can request or verify an SMS.
+	// Ignore premature verification fields when no challenge exists yet.
+	if d.state.TempToken == "" && action == "verify_sms" {
+		action, code = "none", ""
+	}
+	if d.state.TempToken != "" && (action == "none" || action == "") && code != "" {
+		action = "verify_sms"
+	}
 	if action == "verify_sms" {
 		if code == "" {
 			return errors.New("请填写 sms_code 后再提交验证")
@@ -185,7 +193,9 @@ func (d *BitQiu) initWindows(ctx context.Context) error {
 			return d.checkClientSession(ctx)
 		}
 	}
-	if action == "send_sms" {
+	// Send the first SMS only after driver initialization has obtained a challenge.
+	// Persist the attempt before I/O so reloads and failures never resend it.
+	if action == "send_sms" || d.state.SMSAttemptedAt == 0 {
 		if d.state.SMSAttemptedAt != 0 && time.Since(time.Unix(d.state.SMSAttemptedAt, 0)) < time.Minute {
 			return errors.New("BitQiu 发送间隔不足 60 秒，请稍后再选择 send_sms 保存")
 		}
@@ -198,7 +208,7 @@ func (d *BitQiu) initWindows(ctx context.Context) error {
 		if resp.Code != successCode {
 			return fmt.Errorf("BitQiu 短信发送未成功（code=%s）；可等待 60 秒后重新选择 send_sms", resp.Code)
 		}
-		return errors.New("BitQiu 短信已发送，请重新打开存储编辑页，填写 sms_code，选择 verify_sms 并保存")
+		return fmt.Errorf("%w：BitQiu 新设备短信已发送；请重新打开已创建的存储编辑页，填写 sms_code 并保存", errs.DriverInitPending)
 	}
 	return d.pending()
 }

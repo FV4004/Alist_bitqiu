@@ -2,6 +2,11 @@ package op_test
 
 import (
 	"context"
+	"fmt"
+	"github.com/alist-org/alist/v3/drivers/local"
+	"github.com/alist-org/alist/v3/internal/driver"
+	"github.com/alist-org/alist/v3/internal/errs"
+	"strings"
 	"testing"
 
 	"github.com/alist-org/alist/v3/internal/conf"
@@ -86,5 +91,31 @@ func setupStorages(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to create storage: %+v", err)
 		}
+	}
+}
+
+// Waiting for SMS is a persisted state, not a failed create/update operation.
+type pendingLoginStorage struct{ local.Local }
+
+func (d *pendingLoginStorage) Config() driver.Config { return driver.Config{Name: "TestPendingLogin"} }
+func (d *pendingLoginStorage) Init(context.Context) error {
+	return fmt.Errorf("%w: SMS sent", errs.DriverInitPending)
+}
+func TestPendingLoginCanBeCreatedAndEdited(t *testing.T) {
+	op.RegisterDriver(func() driver.Driver { return &pendingLoginStorage{} })
+	ctx := context.Background()
+	id, err := op.CreateStorage(ctx, model.Storage{Driver: "TestPendingLogin", MountPath: "/pending-login-test", Addition: `{"root_folder_path":"."}`})
+	if err != nil || id == 0 {
+		t.Fatalf("create waiting storage: id=%d err=%v", id, err)
+	}
+	saved, err := db.GetStorageById(id)
+	if err != nil || !strings.Contains(saved.Status, "SMS sent") {
+		t.Fatalf("waiting state lost: %v/%v", saved, err)
+	}
+	if saved.Status == op.WORK {
+		t.Fatal("unauthenticated driver marked working")
+	}
+	if err := op.UpdateStorage(ctx, *saved); err != nil {
+		t.Fatalf("edit waiting storage: %v", err)
 	}
 }

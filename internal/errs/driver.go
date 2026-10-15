@@ -3,6 +3,8 @@ package errs
 import "errors"
 
 var (
-	EmptyToken = errors.New("empty token")
-	LinkIsDir  = errors.New("link is dir")
+	// DriverInitPending means the saved driver is awaiting user authentication.
+	DriverInitPending = errors.New("等待完成登录验证")
+	EmptyToken        = errors.New("empty token")
+	LinkIsDir         = errors.New("link is dir")
 )

@@ -79,6 +79,9 @@ func CreateStorage(ctx context.Context, storage model.Storage) (uint, error) {
 	// already has an id
 	err = initStorage(ctx, storage, storageDriver)
 	go callStorageHooks("add", storageDriver)
+	if errors.Is(err, errs.DriverInitPending) {
+		return storage.ID, nil
+	}
 	if err != nil {
 		return storage.ID, errors.Wrap(err, "failed init storage but storage is already created")
 	}
@@ -175,6 +178,9 @@ func EnableStorage(ctx context.Context, id uint) error {
 		return errors.WithMessage(err, "failed update storage in db")
 	}
 	err = LoadStorage(ctx, *storage)
+	if errors.Is(err, errs.DriverInitPending) {
+		return nil
+	}
 	if err != nil {
 		return errors.WithMessage(err, "failed load storage")
 	}
@@ -274,6 +280,9 @@ func UpdateStorage(ctx context.Context, storage model.Storage) error {
 	err = initStorage(ctx, storage, storageDriver)
 	go callStorageHooks("update", storageDriver)
 	log.Debugf("storage %+v is update", storageDriver)
+	if errors.Is(err, errs.DriverInitPending) {
+		return nil
+	}
 	return err
 }
 

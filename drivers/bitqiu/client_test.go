@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/alist-org/alist/v3/internal/model"
+	"github.com/alist-org/alist/v3/internal/op"
 	"github.com/go-resty/resty/v2"
 )
 
@@ -84,13 +85,8 @@ func TestDeviceVerificationSurvivesStorageReload(t *testing.T) {
 	if err := d.Init(context.Background()); err == nil || !strings.Contains(err.Error(), "新设备") {
 		t.Fatalf("expected challenge, got %v", err)
 	}
-	if sms.Load() != 0 {
-		t.Fatal("must not send SMS without explicit action")
-	}
-	d = cloneClient(d)
-	d.LoginAction = "send_sms"
-	if err := d.Init(context.Background()); err == nil || !strings.Contains(err.Error(), "已发送") {
-		t.Fatalf("send: %v", err)
+	if sms.Load() != 1 || verify.Load() != 0 {
+		t.Fatal("driver must send the first SMS after login without requiring a code")
 	}
 	if d.LoginAction != "none" {
 		t.Fatal("action not consumed")
@@ -101,7 +97,7 @@ func TestDeviceVerificationSurvivesStorageReload(t *testing.T) {
 		t.Fatal("restart repeated SMS or password login")
 	}
 	d = cloneClient(d)
-	d.LoginAction = "verify_sms"
+	d.LoginAction = "none" // filling the code after startup is sufficient
 	d.SMSCode = "123456"
 	if err := d.Init(context.Background()); err != nil {
 		t.Fatal(err)
@@ -126,7 +122,7 @@ func TestVerificationFailureConsumesCodeWithoutExposingSecrets(t *testing.T) {
 		calls.Add(1)
 		reply(w, 10805, map[string]string{"message": "challenge-secret"})
 	})
-	d.state = clientState{Binding: d.binding(), TempToken: "challenge-secret", Phone: "13800000000", ChallengedAt: time.Now().Unix()}
+	d.state = clientState{Binding: d.binding(), TempToken: "challenge-secret", Phone: "13800000000", ChallengedAt: time.Now().Unix(), SMSAttemptedAt: time.Now().Unix()}
 	d.saveClient()
 	d.LoginAction = "verify_sms"
 	d.SMSCode = "bad-code"
@@ -179,6 +175,10 @@ func TestAccountOrDeviceChangeInvalidatesSavedSession(t *testing.T) {
 		t.Run(change, func(t *testing.T) {
 			var login atomic.Int32
 			d := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/loginServer/getMobileAuthCode" {
+					reply(w, 10200, nil)
+					return
+				}
 				if r.URL.Path != "/loginServer/login" {
 					t.Errorf("stale session used at %s", r.URL.Path)
 				}
@@ -308,4 +308,45 @@ func TestSigningUsesUnescapedValuesAndStableOrder(t *testing.T) {
 	if signClientForm(fields) != expected {
 		t.Fatal("sign itself included in signature")
 	}
+}
+
+// A transport failure can mean the server already sent the SMS. Never repeat it
+// automatically, even across a freshly constructed driver after a NAS restart.
+func TestInitialSMSFailureIsNotRetriedOnReload(t *testing.T) {
+	var login, sms, verify atomic.Int32
+	d := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/loginServer/login":
+			login.Add(1)
+			reply(w, 10807, map[string]string{"temp_token": "challenge", "phone": "13800000000"})
+		case "/loginServer/getMobileAuthCode":
+			sms.Add(1)
+			w.WriteHeader(http.StatusBadGateway)
+		case "/loginServer/validatePhone":
+			verify.Add(1)
+			t.Error("new driver must not submit a verification code")
+		}
+	})
+	// Even a premature verify action cannot demand a code before initial login.
+	d.LoginAction = "verify_sms"
+	if err := d.Init(context.Background()); err == nil {
+		t.Fatal("expected SMS transport failure")
+	}
+	d = cloneClient(d)
+	_ = d.Init(context.Background())
+	if login.Load() != 1 || sms.Load() != 1 || verify.Load() != 0 {
+		t.Fatal("SMS repeated or verification attempted before code entry")
+	}
+}
+
+func TestSMSCodeIsOptionalInDriverForm(t *testing.T) {
+	for _, item := range op.GetDriverInfoMap()["BitQiu"].Additional {
+		if item.Name == "sms_code" {
+			if item.Required || item.Default != "" {
+				t.Fatal("new driver form requires a verification code")
+			}
+			return
+		}
+	}
+	t.Fatal("sms_code field missing")
 }
