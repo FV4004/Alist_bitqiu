@@ -45,6 +45,22 @@ jobs:
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           docker push ghcr.io/fv4004/alist_bitqiu:sha-${GITHUB_SHA::12}
           docker push ghcr.io/fv4004/alist_bitqiu:latest
+      - name: Publish Docker Hub image
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          printf '%s' "$DOCKERHUB_TOKEN" | \
+            docker login docker.io \
+            -u "$DOCKERHUB_USERNAME" \
+            --password-stdin
+
+          docker tag \
+            ghcr.io/fv4004/alist_bitqiu:latest \
+            "$DOCKERHUB_USERNAME/alist_bitqiu:latest"
+
+          docker push \
+            "$DOCKERHUB_USERNAME/alist_bitqiu:latest"
       - name: Export portable image and binary
         run: |
           mkdir -p release
