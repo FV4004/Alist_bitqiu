@@ -40,6 +40,15 @@ func TestBitQiuNASIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	db.Init(database)
+	op.ClearRoleCache()
+	for _, role := range []model.Role{
+		{ID: uint(model.ADMIN), Name: "admin", PermissionScopes: []model.PermissionEntry{{Path: "/", Permission: 65535}}},
+		{ID: uint(model.GUEST), Name: "guest", PermissionScopes: []model.PermissionEntry{{Path: "/", Permission: 0}}},
+	} {
+		if err := op.CreateRole(&role); err != nil {
+			t.Fatal(err)
+		}
+	}
 	sqlDB, _ := database.DB()
 	originalDriver, _ := op.GetDriver("BitQiu")
 	op.RegisterDriver(func() driver.Driver { return &nasFixtureDriver{} })
@@ -53,6 +62,7 @@ func TestBitQiuNASIntegration(t *testing.T) {
 		if originalDriver != nil {
 			op.RegisterDriver(originalDriver)
 		}
+		op.ClearRoleCache()
 		op.SettingCacheUpdate()
 		sqlDB.Close()
 		conf.Conf = oldConf
@@ -87,7 +97,7 @@ func TestBitQiuNASIntegration(t *testing.T) {
 		c.Request.Header.Set("Content-Type", "application/json")
 		user := &model.User{ID: 1, BasePath: "/", Role: model.Roles{2}}
 		if !admin {
-			user.Role = model.Roles{3}
+			user.Role = model.Roles{model.GUEST}
 		}
 		c.Set("user", user)
 		c.Set("meta", (*model.Meta)(nil))
@@ -103,7 +113,7 @@ func TestBitQiuNASIntegration(t *testing.T) {
 		_ = json.Unmarshal(result["code"], &n)
 		return n
 	}
-	requireOK := func(result map[string]json.RawMessage) {
+	requireOK := func(t *testing.T, result map[string]json.RawMessage) {
 		t.Helper()
 		if code(result) != 200 {
 			t.Fatalf("request failed: %s", result)
@@ -113,7 +123,7 @@ func TestBitQiuNASIntegration(t *testing.T) {
 		seen := map[string]bool{}
 		for page := 1; page <= 3; page++ {
 			result := invoke(FsList, map[string]any{"path": "/cloud", "page": page, "per_page": 100}, true)
-			requireOK(result)
+			requireOK(t, result)
 			var data FsListResp
 			if err := json.Unmarshal(result["data"], &data); err != nil {
 				t.Fatal(err)
@@ -132,7 +142,7 @@ func TestBitQiuNASIntegration(t *testing.T) {
 			t.Fatalf("lost entries: %d", len(seen))
 		}
 		result := invoke(FsList, map[string]any{"path": "/cloud"}, true)
-		requireOK(result)
+		requireOK(t, result)
 		var data FsListResp
 		_ = json.Unmarshal(result["data"], &data)
 		if len(data.Content) != 238 || data.HasMore {
@@ -140,9 +150,9 @@ func TestBitQiuNASIntegration(t *testing.T) {
 		}
 	})
 	t.Run("visual directories and confinement", func(t *testing.T) {
-		requireOK(invoke(BitQiuNASMkdir, map[string]string{"path": "/nas", "name": "Movies"}, true))
+		requireOK(t, invoke(BitQiuNASMkdir, map[string]string{"path": "/nas", "name": "Movies"}, true))
 		result := invoke(BitQiuNASDirs, map[string]string{"path": "/nas"}, true)
-		requireOK(result)
+		requireOK(t, result)
 		var dirs []nasTarget
 		_ = json.Unmarshal(result["data"], &dirs)
 		if len(dirs) != 1 || dirs[0].Path != "Movies" {
@@ -163,7 +173,7 @@ func TestBitQiuNASIntegration(t *testing.T) {
 	})
 	t.Run("background file and recursive downloads", func(t *testing.T) {
 		result := invoke(BitQiuNASDownload, MoveCopyReq{SrcDir: "/cloud", DstDir: "/nas/Movies", Names: []string{"file-000.txt", "folder"}}, true)
-		requireOK(result)
+		requireOK(t, result)
 		// Drain queued work deterministically: the upstream task fields are not
 		// synchronized for concurrent reads, so this test owns execution.
 		executed := map[string]bool{}
@@ -217,7 +227,7 @@ func TestBitQiuNASIntegration(t *testing.T) {
 	})
 	t.Run("targets omit credentials and admin guard", func(t *testing.T) {
 		result := invoke(BitQiuNASTargets, nil, true)
-		requireOK(result)
+		requireOK(t, result)
 		var data struct{ Cloud, Targets []nasTarget }
 		_ = json.Unmarshal(result["data"], &data)
 		if len(data.Cloud) != 1 || len(data.Targets) != 1 || bytes.Contains(result["data"], []byte(source)) {
@@ -243,6 +253,13 @@ func TestBitQiuNASIntegration(t *testing.T) {
 		if err := enableNASDownloads(context.Background(), dest, "/enabled"); err != nil {
 			t.Fatal(err)
 		}
+		if info, err := os.Stat(filepath.Join(dest, "Movies")); err != nil || !info.IsDir() {
+			t.Fatal("fixture target missing", err)
+		}
+		if code(invoke(FsList, map[string]any{"path": "/enabled"}, false)) == 200 {
+			t.Fatal("new NAS mount exposed to guest")
+		}
+		requireOK(t, invoke(FsList, map[string]any{"path": "/enabled"}, true))
 		if err := enableNASDownloads(context.Background(), source, "/enabled"); err == nil {
 			t.Fatal("replaced conflicting mount")
 		}

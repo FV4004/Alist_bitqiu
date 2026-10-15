@@ -2,6 +2,8 @@ package handles
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/alist-org/alist/v3/drivers/local"
 	"github.com/alist-org/alist/v3/internal/driver"
+	"github.com/alist-org/alist/v3/internal/errs"
 	"github.com/alist-org/alist/v3/internal/model"
 	"github.com/alist-org/alist/v3/internal/op"
 	"github.com/alist-org/alist/v3/pkg/utils"
@@ -65,6 +68,29 @@ func enableNASDownloads(ctx context.Context, root, mount string) error {
 			return nil
 		}
 		return errors.New("NAS 下载挂载名已被其他存储占用，请先在存储管理中处理")
+	}
+	// Local storages otherwise inherit the site's guest read access. Protect
+	// this new mount before exposing it; administrators bypass metadata passwords.
+	meta, err := op.GetMetaByPath(mount)
+	if err != nil && !errors.Is(err, errs.MetaNotFound) {
+		return err
+	}
+	protected := model.Meta{Path: mount}
+	if meta != nil {
+		protected = *meta
+	}
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return err
+	}
+	protected.Password, protected.PSub = hex.EncodeToString(secret), true
+	if protected.ID == 0 {
+		err = op.CreateMeta(&protected)
+	} else {
+		err = op.UpdateMeta(&protected)
+	}
+	if err != nil {
+		return err
 	}
 	addition, _ := json.Marshal(map[string]any{"root_folder_path": root, "show_hidden": true, "mkdir_perm": "755"})
 	_, err = op.CreateStorage(ctx, model.Storage{Driver: "Local", MountPath: mount, Addition: string(addition), Remark: "BitQiu NAS 下载目录", DisableIndex: true})

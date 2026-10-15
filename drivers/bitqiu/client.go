@@ -469,6 +469,9 @@ func clientObject(raw json.RawMessage, parentID, parentPath string, folder bool)
 	if id == "" || name == "" {
 		return nil, errors.New("BitQiu 文件元数据缺少 ID 或文件名")
 	}
+	if name == "." || name == ".." || strings.ContainsAny(name, "/\\\x00") {
+		return nil, errors.New("BitQiu 文件元数据包含无效的文件名")
+	}
 	o := &Object{Object: model.Object{ID: id, Name: name, IsFolder: folder, Size: intField(m, "size", "fileSize", "file_size")}, ParentID: parentID}
 	o.ClientIDSource = source
 	o.ClientIDChanged = id != textField(m, "resourceId", "resource_id", "fileId", "file_id", "dirId", "dir_id", "id")
@@ -540,7 +543,7 @@ func parseClientPage(raw json.RawMessage, parentID, parentPath string, limit int
 		return nil, false, errors.New("BitQiu 未识别的目录响应结构")
 	}
 	for _, key := range []string{"hasNext", "has_next"} {
-		if v, ok := m[key]; ok {
+		if v, ok := m[key]; ok && !bytes.Equal(bytes.TrimSpace(v), []byte("null")) {
 			var next bool
 			if json.Unmarshal(v, &next) == nil {
 				return objs, next, nil

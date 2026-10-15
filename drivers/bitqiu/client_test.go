@@ -532,3 +532,16 @@ func TestClientPageNextMarkerTypes(t *testing.T) {
 		t.Fatal("oversized page truncated listing", err)
 	}
 }
+
+func TestClientPageNullMarkerAndInvalidNames(t *testing.T) {
+	_, more, err := parseClientPage(json.RawMessage(`{"data":[{"resourceId":"a","name":"a","sort":"next"}],"hasNext":null}`), "root", "/", 1)
+	if err != nil || !more {
+		t.Fatal("null marker truncated listing", err)
+	}
+	for _, name := range []string{"../outside", "a/b", "a\\b", ".."} {
+		raw, _ := json.Marshal(map[string]string{"resourceId": "file", "name": name})
+		if _, err := clientObject(raw, "root", "/", false); err == nil {
+			t.Fatalf("accepted unsafe provider name %q", name)
+		}
+	}
+}
