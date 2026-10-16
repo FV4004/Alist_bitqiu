@@ -279,6 +279,15 @@ func TestNASDownloadLifecycle(t *testing.T) {
 		}
 	})
 	t.Run("limit 5 and shrinking pauses latest starts while retaining oldest", func(t *testing.T) {
+		// Release fixture sources even when an assertion fails; parent cleanup must
+		// not block inside httptest.Server.Close while reporting the failure.
+		defer func() {
+			select {
+			case <-limitRelease:
+			default:
+				close(limitRelease)
+			}
+		}()
 		nasEventually(t, func() bool { return active.Load() == 0 })
 		maxActive.Store(0)
 		CopyTaskManager.SetWorkersNumActive(8) // The NAS cap must win over a larger shared queue.

@@ -2,3 +2,6 @@
 !Dockerfile.bitqiu
 !build/
 !build/alist
+!scripts/
+!scripts/bitqiu-entrypoint.sh
+!scripts/check-downloads.awk

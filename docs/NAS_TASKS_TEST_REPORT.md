@@ -79,4 +79,6 @@ python scripts/test-nas-browser.py
 - Dockerfile 和 Compose 声明 /downloads，Compose 强制提供已有路径；升级需要新增 NAS 绑定挂载。已有数据和最终文件命名不变，新增设置占用现有表一项，无表结构迁移。
 - 移动端只做可行性评估和 320/360/390/430/768px 视口验证，未修改原 CSS 布局；详见 NAS_PORTRAIT_ASSESSMENT.md。模拟测试不替代真实极空间/iOS/Android 验收。
 
-本地浏览器增量测试和挂载解析测试已通过。Go 依赖下载仍受云环境策略限制，完整 Go/race 和最终镜像启动检查继续作为 GitHub Actions 发布前门禁。以对应提交的 Actions 结果确认最终验收状态。
+本地浏览器增量测试、挂载解析及复用上一版二进制的真实启动入口测试已通过。完整 Go/race、5 调到 2 的真实传输测试及浏览器回归已在 GitHub Actions 通过；使用新二进制的最终镜像启动检查继续作为发布门禁。对应提交的完整 Actions 成功结果确认最终验收状态。
+
+构建上下文 `.dockerignore` 仅额外放行两个启动检查文件，保留原二进制白名单；不打包工作区的其它脚本、安装包或配置。
