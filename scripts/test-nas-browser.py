@@ -12,8 +12,8 @@ with sync_playwright() as p:
  for prefix in ['', '/alist']:
   context=browser.new_context(viewport={'width':1440,'height':1000})
   context.add_init_script("localStorage.setItem('token','fixture-token')")
-  requests=[];errors=[];controls=[]
-  tasks=[{'id':id,'name':name,'state':state,'progress':25,'total_bytes':104857600,'transferred_bytes':26214400,'speed_bytes_per_second':2097152,'start_time':'2026-01-02T00:00:00Z','restart_required':id=='restart'} for id,name,state in [('active1','下载 fixture','downloading'),('paused1','暂停 fixture','paused'),('waiting1','等待 fixture','waiting'),('restart','不支持续传 fixture','paused')]]
+  requests=[];errors=[];controls=[];cfg={"limit":5,"order":1,"fail_next":False}
+  tasks=[{'id':id,'name':name,'state':state,'progress':25,'total_bytes':104857600,'transferred_bytes':26214400,'speed_bytes_per_second':2097152,'start_time':'2026-01-02T00:00:00Z','restart_required':id=='restart','start_order':1 if id=='active1' else 0} for id,name,state in [('active1','下载 fixture','downloading'),('paused1','暂停 fixture','paused'),('waiting1','等待 fixture','waiting'),('restart','不支持续传 fixture','paused')]]
   tasks.extend({'id':'done'+str(i),'name':'历史 fixture '+str(i),'state':s,'completion_reason':reason,'progress':100 if s=='completed' else 30,'total_bytes':1024,'end_time':f'2026-01-01T00:00:0{i}Z','error':'context deadline exceeded' if reason=='timeout' else ''} for i,(s,reason) in enumerate([('completed','completed'),('canceled','user_canceled'),('failed','timeout'),('failed','failed')]))
   tasks.extend({'id':'older'+str(i),'name':'更早任务 '+str(i),'state':'completed','completion_reason':'completed','end_time':'2025-01-01T00:00:00Z'} for i in range(41))
   def caps(t):
@@ -33,7 +33,14 @@ with sync_playwright() as p:
     elif endpoint=='/admin/bitqiu/nas/stats':requests.append(body);data={'selected_count':len(body['names']),'file_count':3,'known_bytes':1048576,'unknown_count':1}
     elif endpoint=='/admin/bitqiu/nas/dirs':data=[{'path':'电影','label':'电影'}] if body['path']=='/NAS下载' else []
     elif endpoint=='/admin/bitqiu/nas/download':requests.append(body);data={'tasks':[{'id':'fixture-task'}]}
-    elif endpoint=='/admin/bitqiu/nas/tasks':data={'active':[caps(t) for t in tasks if t['state'] not in ['completed','canceled','failed']],'history':[caps(t) for t in tasks if t['state'] in ['completed','canceled','failed']]}
+    elif endpoint=='/admin/bitqiu/nas/tasks':data={'active':[caps(t) for t in tasks if t['state'] not in ['completed','canceled','failed']],'history':[caps(t) for t in tasks if t['state'] in ['completed','canceled','failed']],'concurrency':{'limit':cfg['limit'],'maximum':5,'running':sum(t['state']=='downloading' for t in tasks)}}
+    elif endpoint=='/admin/bitqiu/nas/concurrency':
+     if cfg['fail_next']:
+      cfg['fail_next']=False;r.fulfill(status=200,content_type='application/json',body=json.dumps({'code':500,'message':'fixture 保存失败'}));return
+     cfg['limit']=body['limit'];running=sorted((t for t in tasks if t['state']=='downloading'),key=lambda t:t['start_order'],reverse=True)
+     paused=running[:max(0,len(running)-cfg['limit'])]
+     for t in paused:t['state']='paused'
+     data={'limit':cfg['limit'],'maximum':5,'running':len(running)-len(paused),'paused':len(paused),'pending':0}
     elif endpoint=='/admin/bitqiu/nas/control':
      controls.append(body);assert body['scope'] in ['all','selected'];success=skipped=failed=0
      for task in tasks:
@@ -42,6 +49,7 @@ with sync_playwright() as p:
       if not eligible:skipped+=1;continue
       if action=='start' and task.get('restart_required') and not body.get('restart'):failed+=1;continue
       success+=1;task['state']={'start':'downloading','pause':'paused','cancel':'canceled'}[action]
+      if action=='start':cfg['order']+=1;task['start_order']=cfg['order']
       if action=='cancel':assert body['confirmed'];task.update(completion_reason='user_canceled',end_time='2030-01-01T00:00:00Z')
      data={'success':success,'skipped':skipped,'failed':failed,'details':[]}
     elif endpoint.endswith('/mkdir'):data=None
@@ -91,6 +99,16 @@ with sync_playwright() as p:
   page.locator('#batch-start').click();expect(card('paused1').locator('.task-speed')).to_have_text('2.0 MB/s')
   assert set(controls[-1]['ids'])=={'active1','paused1'} and controls[-1]['scope']=='selected'
   assert next(t for t in tasks if t['id']=='waiting1')['state']=='waiting'
+  expect(page.locator('#nas-concurrency')).to_have_value('5')
+  page.locator('#nas-concurrency').select_option('1')
+  expect(page.locator('#notice')).to_contain_text('自动暂停 1 个最晚开始的任务')
+  expect(card('paused1').locator('.task-speed')).to_have_text('已暂停')
+  expect(card('active1').locator('.task-speed')).to_have_text('2.0 MB/s')
+  page.reload();expect(page.locator('#nas-concurrency')).to_have_value('1')
+  cfg['fail_next']=True;page.locator('#nas-concurrency').select_option('2')
+  expect(page.locator('#notice')).to_contain_text('fixture 保存失败');expect(page.locator('#nas-concurrency')).to_have_value('1')
+  page.locator('#nas-concurrency').select_option('3');expect(page.locator('#notice')).to_contain_text('上限已保存为 3 个')
+  expect(card('paused1').locator('.task-speed')).to_have_text('已暂停')
   page.locator('#history-tab').click()
   for reason in ['正常结束','用户取消','超时','失败']:assert reason in page.locator('#history-tasks').inner_text()
   page.locator('#active-tab').click()
@@ -115,8 +133,13 @@ with sync_playwright() as p:
   for sort,name in [('name:asc','file-000.txt'),('modified:asc','file-000.txt'),('size:desc','file-236.txt')]:
    page.locator('#sort-order').select_option(sort);expect(page.locator('#source-files tr').first.locator('.file-heading')).to_contain_text(name)
   expect(page.locator('#source-files .file-meta').first).to_contain_text('KB · 修改于')
-  page.set_viewport_size({'width':390,'height':844});page.screenshot(path=str(output/'nas-download-mobile-preview.png'),full_page=True)
-  assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'),'horizontal overflow'
+  for width in [320,360,390,430,768]:
+   page.set_viewport_size({'width':width,'height':844})
+   assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'),'horizontal overflow at '+str(width)
+   metrics=page.evaluate('''()=>({width:innerWidth,document_height:document.documentElement.scrollHeight,min_button_height:Math.min(...[...document.querySelectorAll('button')].filter(x=>x.getClientRects().length).map(x=>x.getBoundingClientRect().height)),checkbox_width:document.querySelector('#select-page').getBoundingClientRect().width})''')
+   print('PORTRAIT ASSESSMENT',json.dumps(metrics))
+   if width==390:page.screenshot(path=str(output/'nas-download-mobile-preview.png'),full_page=True)
+
   assert not errors,errors
   print('PASS TEST-01/02/03/04/05/06/07/09/10/11/12 UI; backend termination/resume verified separately in Go; prefix='+repr(prefix));context.close()
  browser.close()

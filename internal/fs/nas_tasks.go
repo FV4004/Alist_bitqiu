@@ -57,14 +57,18 @@ type NASView struct {
 	CanCancel bool    `json:"can_cancel"`
 }
 type nasTask struct {
-	mu     sync.Mutex
-	action sync.Mutex
-	record NASRecord
-	active bool
-	queued bool
-	cancel context.CancelFunc
-	done   chan struct{}
-	meter  task.TransferMeter
+	mu         sync.Mutex
+	action     sync.Mutex
+	record     NASRecord
+	active     bool
+	queued     bool
+	ready      bool
+	cancel     context.CancelFunc
+	done       chan struct{}
+	meter      task.TransferMeter
+	creator    *model.User
+	queueOrder uint64
+	startOrder uint64
 }
 
 var nasRegistry = struct {
@@ -175,7 +179,12 @@ func InitNASDownloads() (result error) {
 			return err
 		}
 	}
+	limit, err := loadNASConcurrency()
+	if err != nil {
+		return err
+	}
 	nasRegistry.Lock()
+	nasLimit = limit
 	nasRegistry.tasks = map[string]*nasTask{}
 	for _, r := range records {
 		if r.State == "downloading" || r.State == "waiting" || r.State == "pausing" {
@@ -204,6 +213,7 @@ func ResetNASDownloads() {
 	nasHealth.Unlock()
 	nasRegistry.Lock()
 	nasRegistry.tasks = map[string]*nasTask{}
+	nasLimit = NASMaxConcurrency
 	nasRegistry.Unlock()
 }
 func NewNASRecord(user *model.User, source, destination, root, relative, srcMount, dstMount, srcPath string, obj model.Obj) (NASRecord, error) {
@@ -234,7 +244,7 @@ func QueueNASDownloads(records []NASRecord, user *model.User) error {
 		}
 	}
 	for _, r := range records {
-		nasRegistry.tasks[r.ID] = &nasTask{record: r}
+		nasRegistry.tasks[r.ID] = &nasTask{record: r, creator: user, queueOrder: nasQueueSequence.Add(1)}
 	}
 	nasRegistry.Unlock()
 	if err := SaveNASDownloads(); err != nil {
@@ -245,20 +255,21 @@ func QueueNASDownloads(records []NASRecord, user *model.User) error {
 		nasRegistry.Unlock()
 		return err
 	}
+	nasRegistry.Lock()
 	for _, r := range records {
-		n, _ := nasFind(r.ID)
-		enqueueNAS(n, user)
+		if n, ok := nasRegistry.tasks[r.ID]; ok {
+			n.mu.Lock()
+			n.ready = true
+			n.mu.Unlock()
+		}
 	}
+	nasRegistry.Unlock()
+	dispatchNAS()
 	return nil
 }
-func enqueueNAS(n *nasTask, user *model.User) {
+func enqueueNAS(n *nasTask) {
 	n.mu.Lock()
-	if n.queued {
-		n.mu.Unlock()
-		return
-	}
-	n.queued = true
-	r := n.record
+	r, user := n.record, n.creator
 	n.mu.Unlock()
 	t := &CopyTask{NAS: n, SrcStorageMp: r.SrcMount, DstStorageMp: r.DstMount, SrcObjPath: r.SrcPath, DstDirPath: path.Dir(r.Relative)}
 	t.TaskExtension.Creator = user
@@ -293,6 +304,7 @@ func ControlNASDownload(ctx context.Context, id, action string, restart bool, us
 		}
 		if state == "waiting" {
 			n.mu.Unlock()
+			dispatchNAS()
 			CopyTaskManager.Start()
 			return true, nil
 		}
@@ -301,6 +313,10 @@ func ControlNASDownload(ctx context.Context, id, action string, restart bool, us
 			return false, errors.New("下载源无法安全续传，需单独确认从头重新下载")
 		}
 		prior := n.record
+		priorReady := n.ready
+		n.ready = false
+		n.creator = user
+		n.queueOrder = nasQueueSequence.Add(1)
 		n.record.State = "waiting"
 		n.record.Restart = restart
 		n.record.Error = ""
@@ -309,10 +325,14 @@ func ControlNASDownload(ctx context.Context, id, action string, restart bool, us
 		if err := SaveNASDownloads(); err != nil {
 			n.mu.Lock()
 			n.record = prior
+			n.ready = priorReady
 			n.mu.Unlock()
 			return false, err
 		}
-		enqueueNAS(n, user)
+		n.mu.Lock()
+		n.ready = true
+		n.mu.Unlock()
+		dispatchNAS()
 		return true, nil
 	}
 	if action == "pause" && state == "waiting" && len(pauseWaiting) > 0 && pauseWaiting[0] {
@@ -390,11 +410,13 @@ func PauseNASWaiting() (map[string]bool, error) {
 func (t *CopyTask) runNAS() (err error) {
 	n := t.NAS
 	nasRegistry.Lock()
+	active := activeNASLocked()
 	n.mu.Lock()
-	nasRegistry.Unlock()
 	n.queued = false
-	if n.active || n.record.State != "waiting" {
+	if n.active || !n.ready || n.record.State != "waiting" || active >= nasLimit {
 		n.mu.Unlock()
+		nasRegistry.Unlock()
+		dispatchNAS()
 		return context.Canceled
 	}
 	ctx, cancel := context.WithCancel(context.WithValue(t.TaskExtension.Base.Ctx(), "user", t.GetCreator()))
@@ -402,10 +424,12 @@ func (t *CopyTask) runNAS() (err error) {
 	n.cancel = cancel
 	n.done = make(chan struct{})
 	n.record.State = "downloading"
+	n.startOrder = nasStartSequence.Add(1)
 	now := time.Now()
 	n.record.StartTime = &now
 	n.record.EndTime = nil
 	n.mu.Unlock()
+	nasRegistry.Unlock()
 	n.meter.Start(now)
 	persistErr := SaveNASDownloads()
 	defer func() {
@@ -455,6 +479,7 @@ func (t *CopyTask) runNAS() (err error) {
 		}
 		_ = SaveNASDownloads()
 		close(done)
+		dispatchNAS()
 	}()
 	if persistErr != nil {
 		return fmt.Errorf("保存任务状态失败，未开始传输：%w", persistErr)

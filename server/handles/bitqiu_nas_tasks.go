@@ -213,7 +213,7 @@ func BitQiuNASTasks(c *gin.Context) {
 			active = append(active, v)
 		}
 	}
-	common.SuccessResp(c, gin.H{"active": active, "history": history})
+	common.SuccessResp(c, gin.H{"active": active, "history": history, "concurrency": fs.NASConcurrencyStatus()})
 }
 func BitQiuNASControl(c *gin.Context) {
 	var req struct {
@@ -284,4 +284,22 @@ func BitQiuNASControl(c *gin.Context) {
 		}
 	}
 	common.SuccessResp(c, gin.H{"success": success, "failed": failed, "skipped": skipped, "details": details})
+}
+
+func BitQiuNASConcurrency(c *gin.Context) {
+	var req struct {
+		Limit int `json:"limit"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ErrorResp(c, err, 400)
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+	defer cancel()
+	result, err := fs.SetNASConcurrency(ctx, req.Limit)
+	if err != nil {
+		common.ErrorResp(c, err, 400)
+		return
+	}
+	common.SuccessResp(c, result)
 }

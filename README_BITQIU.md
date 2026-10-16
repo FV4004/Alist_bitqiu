@@ -12,9 +12,10 @@
 
 ## NAS 部署
 
-先备份原有 AList 数据目录。使用 `compose.bitqiu.yml`，把数据挂载路径改成现有 AList 数据目录，然后运行：
+先备份原有 AList 数据目录。使用 `compose.bitqiu.yml`，把数据挂载路径改成现有 AList 数据目录，并设置已经存在的 NAS 下载目录（绝对路径），然后运行：
 
 ```sh
+export NAS_DOWNLOAD_DIR=/你的NAS路径/下载目录
 docker compose -f compose.bitqiu.yml up -d
 ```
 
@@ -24,6 +25,10 @@ docker compose -f compose.bitqiu.yml up -d
 gzip -dc alist-bitqiu-linux-amd64-image.tar.gz | docker load
 docker compose -f compose.bitqiu.yml up -d
 ```
+
+**v3.65.0-bitqiu.13 起必须绑定 `/downloads`：** 在极空间 Docker 创建/编辑容器时，保留原 `/opt/alist/data`，另选择实际 NAS 文件夹，以读写方式绑定到 `/downloads`。镜像声明该卷以便 Docker 界面显示；未显式选择的自动管理卷、未挂载、只读及下载用户不可写会在正常启动时以配置错误退出。不能只在容器里建同名目录。Docker 镜像无法替管理界面选择宿主机路径，因此 Compose 要求 `NAS_DOWNLOAD_DIR` 且禁止自动创建不存在的源目录；极空间界面需要手动选定。
+
+启动检查通过 `/proc/self/mountinfo` 检查独立挂载，并识别标准 Docker 本地管理卷路径 `.../volumes/<名称>/_data`。特殊卷插件或宿主机路径恰好采用此结构时不能可靠区分，请使用普通 NAS 文件夹绑定挂载。检查不通过不启动 AList，不删除原数据；升级前先补齐挂载。
 
 数据目录、端口和 PUID/PGID 规则与原镜像一致。镜像仅支持 x86_64/amd64 NAS。若 GHCR 包尚未设为 public，可在 GitHub 包设置修改可见性，或使用 Release 镜像文件导入。
 
@@ -181,3 +186,12 @@ NAS 下载页默认按修改时间从新到旧排列，可切换从旧到新、�
 目录统计最多递归 128 层、200000 个源对象，单次最多选择 50000 项，超过时明确提示分批。远程目录统计需要等待 BitQiu 返回完整列表。任务记录损坏时仅停止增强任务写入以保护原记录，AList 主界面仍可启动；请保留数据库备份并检查容器日志。
 
 需求对应、改动文件和测试覆盖见 [NAS 下载验收报告](docs/NAS_TASKS_TEST_REPORT.md)。
+
+
+## NAS 并发限制（v3.65.0-bitqiu.13）
+
+下载任务区增加“同时下载上限”，可选 1–5，默认 5，保存到现有数据库的 `task_items / bitqiu_nas_concurrency_v1` 项，刷新和重启仍保留。不增加数据库表或全局复制配置。实际并发为 NAS 上限和原 AList 复制队列可用名额中较小者，不影响普通复制任务的原有规则。
+
+调低上限时，根据本进程中实际开始下载的先后顺序，优先暂停最晚开始的超出部分；保留临时文件与字节进度，不标记为取消。暂停退出前仍占名额，避免等待任务抢占。等待中的任务保持等待；提高上限后自动补入等待项，已经暂停的任务需手动开始。全部开始和批量开始也遵守同一上限，无法绕过最多 5 个的限制。并发设置对这个 AList 实例的全部 NAS 下载生效，不是每个浏览器各自 5 个。
+
+竖屏适配本轮仅评估：[可行性报告](docs/NAS_PORTRAIT_ASSESSMENT.md)。现有窄屏单列样式保留，不实施手机布局改版。

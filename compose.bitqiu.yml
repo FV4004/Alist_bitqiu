@@ -9,8 +9,12 @@ services:
       - "5245:5245"
     volumes:
       - ./data:/opt/alist/data
-      # Replace ./downloads with the NAS folder chosen in the Docker interface.
-      - ./downloads:/downloads
+      # Set an existing NAS folder explicitly; never create a silent fallback.
+      - type: bind
+        source: ${NAS_DOWNLOAD_DIR:?请设置 NAS_DOWNLOAD_DIR 为已存在的 NAS 文件夹绝对路径}
+        target: /downloads
+        bind:
+          create_host_path: false
     environment:
       PUID: "0"
       PGID: "0"

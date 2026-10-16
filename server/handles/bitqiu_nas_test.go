@@ -333,6 +333,27 @@ func TestBitQiuNASIntegration(t *testing.T) {
 			}
 		}
 	})
+	t.Run("concurrency API bounds and persisted snapshot", func(t *testing.T) {
+		for _, limit := range []int{0, 6, -1} {
+			if code(invoke(BitQiuNASConcurrency, map[string]int{"limit": limit}, true)) == 200 {
+				t.Fatal("accepted invalid limit", limit)
+			}
+		}
+		result := invoke(BitQiuNASConcurrency, map[string]int{"limit": 2}, true)
+		requireOK(t, result)
+		var value fs.NASConcurrency
+		_ = json.Unmarshal(result["data"], &value)
+		if value.Limit != 2 || value.Maximum != 5 {
+			t.Fatalf("bad settings response: %+v", value)
+		}
+		result = invoke(BitQiuNASTasks, nil, true)
+		requireOK(t, result)
+		var response struct{ Concurrency fs.NASConcurrency }
+		_ = json.Unmarshal(result["data"], &response)
+		if response.Concurrency.Limit != 2 {
+			t.Fatal("task snapshot lost setting")
+		}
+	})
 	t.Run("targets omit credentials and admin guard", func(t *testing.T) {
 		result := invoke(BitQiuNASTargets, nil, true)
 		requireOK(t, result)

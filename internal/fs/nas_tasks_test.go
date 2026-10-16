@@ -67,6 +67,7 @@ func TestNASDownloadLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload := bytes.Repeat([]byte("NAS-range-fixture-"), 65536)
+	limitRelease := make(chan struct{})
 	var active, maxActive atomic.Int32
 	var offsetsMu sync.Mutex
 	offsets := map[string][]int64{}
@@ -102,6 +103,13 @@ func TestNASDownloadLifecycle(t *testing.T) {
 				return
 			}
 			w.(http.Flusher).Flush()
+			if strings.HasPrefix(r.URL.Path, "/limit-") && start == int(offset) {
+				select {
+				case <-limitRelease:
+				case <-r.Context().Done():
+					return
+				}
+			}
 			if end == len(payload) {
 				return
 			}
@@ -115,7 +123,7 @@ func TestNASDownloadLifecycle(t *testing.T) {
 	defer server.Close()
 	op.RegisterDriver(func() driver.Driver { return &nasHTTPFixture{endpoint: server.URL} })
 	source, dest := t.TempDir(), t.TempDir()
-	for _, name := range []string{"resume", "no-range", "cancel", "queue1", "queue2", "failure"} {
+	for _, name := range []string{"resume", "no-range", "cancel", "queue1", "queue2", "failure", "limit-0", "limit-1", "limit-2", "limit-3", "limit-4", "limit-5", "limit-6", "limit-7"} {
 		if err = os.WriteFile(filepath.Join(source, name), payload, 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -270,6 +278,111 @@ func TestNASDownloadLifecycle(t *testing.T) {
 			t.Fatalf("worker limit bypassed: %d", maxActive.Load())
 		}
 	})
+	t.Run("limit 5 and shrinking pauses latest starts while retaining oldest", func(t *testing.T) {
+		nasEventually(t, func() bool { return active.Load() == 0 })
+		maxActive.Store(0)
+		CopyTaskManager.SetWorkersNumActive(8) // The NAS cap must win over a larger shared queue.
+		for _, bad := range []int{0, 6, -1} {
+			if _, e := SetNASConcurrency(context.Background(), bad); e == nil {
+				t.Fatalf("accepted limit %d", bad)
+			}
+		}
+		records := []NASRecord{}
+		for i := 0; i < 8; i++ {
+			records = append(records, makeTask(fmt.Sprintf("limit-%d", i)))
+		}
+		for i := 0; i < 5; i++ {
+			if e := QueueNASDownloads(records[i:i+1], user); e != nil {
+				t.Fatal(e)
+			}
+			id := records[i].ID
+			nasEventually(t, func() bool { return view(id).State == "downloading" && view(id).TransferredBytes >= 4096 })
+		}
+		var wg sync.WaitGroup
+		for i := 5; i < 8; i++ {
+			wg.Add(1)
+			go func(r NASRecord) {
+				defer wg.Done()
+				if e := QueueNASDownloads([]NASRecord{r}, user); e != nil {
+					t.Error(e)
+				}
+			}(records[i])
+		}
+		wg.Wait()
+		if v := NASConcurrencyStatus(); v.Running != 5 || v.Limit != 5 {
+			t.Fatalf("bad initial concurrency: %+v", v)
+		}
+		for _, r := range records[5:] {
+			if view(r.ID).State != "waiting" || view(r.ID).TransferredBytes != 0 {
+				t.Fatal("queued task bypassed cap")
+			}
+		}
+		result, e := SetNASConcurrency(context.Background(), 2)
+		if e != nil || result.Paused != 3 || result.Running != 2 {
+			t.Fatalf("shrink: %+v, %v", result, e)
+		}
+		nasEventually(t, func() bool { return active.Load() == 2 })
+		for i, r := range records[:5] {
+			v := view(r.ID)
+			if i < 2 && v.State != "downloading" {
+				t.Fatal("paused an older task")
+			}
+			if i >= 2 {
+				if v.State != "paused" || v.TransferredBytes < 4096 {
+					t.Fatalf("latest task lost pause/bytes: %+v", v)
+				}
+				info, e := os.Stat(filepath.Join(dest, nasPart(r)))
+				if e != nil || info.Size() != v.TransferredBytes {
+					t.Fatal("partial lost", e)
+				}
+			}
+		}
+		if saved, e := loadNASConcurrency(); e != nil || saved != 2 {
+			t.Fatal("limit not persisted", e)
+		}
+		if _, e = SetNASConcurrency(context.Background(), 5); e != nil {
+			t.Fatal(e)
+		}
+		nasEventually(t, func() bool { return NASConcurrencyStatus().Running == 5 })
+		for _, r := range records[2:5] {
+			if view(r.ID).State != "paused" {
+				t.Fatal("raising limit silently resumed a paused task")
+			}
+		}
+		close(limitRelease)
+		nasEventually(t, func() bool {
+			for _, i := range []int{0, 1, 5, 6, 7} {
+				if view(records[i].ID).State != "completed" {
+					return false
+				}
+			}
+			return true
+		})
+		for _, r := range records[2:5] {
+			control(r.ID, "start", false)
+		}
+		nasEventually(t, func() bool {
+			for _, r := range records {
+				if view(r.ID).State != "completed" {
+					return false
+				}
+			}
+			return true
+		})
+		for _, r := range records {
+			data, e := os.ReadFile(filepath.Join(dest, r.Relative))
+			if e != nil || !bytes.Equal(data, payload) {
+				t.Fatal("limited resume corrupted file", e)
+			}
+		}
+		if maxActive.Load() > 5 {
+			t.Fatalf("cap bypassed with 8 shared workers: %d", maxActive.Load())
+		}
+		if _, e = SetNASConcurrency(context.Background(), 1); e != nil {
+			t.Fatal(e)
+		}
+		CopyTaskManager.SetWorkersNumActive(1)
+	})
 	t.Run("HTTP failure persists and permits retry", func(t *testing.T) {
 		r := makeTask("failure")
 		if err = QueueNASDownloads([]NASRecord{r}, user); err != nil {
@@ -301,6 +414,9 @@ func TestNASDownloadLifecycle(t *testing.T) {
 		ResetNASDownloads()
 		if err = InitNASDownloads(); err != nil {
 			t.Fatal(err)
+		}
+		if NASConcurrencyStatus().Limit != 1 {
+			t.Fatal("concurrency setting lost on restart")
 		}
 		if len(NASDownloads()) != count || view("interrupted").State != "paused" || view("interrupted").TransferredBytes != 40 {
 			t.Fatal("journal recovery lost state")

@@ -68,3 +68,15 @@ python scripts/test-nas-browser.py
 使用已有 `task_items` 表的 `bitqiu_nas_v1` 项，不改数据库结构、不加配置、不改变最终文件名和 NAS 路径选择。文件创建沿用 Local 写入的 0666 与容器 umask 组合，保留 NAS 的正常读取规则。新记录不包含密码、Token 或临时下载 URL。容器升级保留原数据和 `/downloads` 挂载；不要删除任务临时文件。
 
 旧式任务继续由原 AList 任务管理查看、重试和取消，不自动迁移到新状态模型。建议完成旧任务后升级。重启后增强任务暂停，手动开始继续；数据库记录损坏时保护原记录并暂停增强任务写入，主 AList 仍可启动。原 HTTP API 保留，新增管理员 `/api/admin/bitqiu/nas/stats`、`tasks`、`control` 接口；普通复制和原并发设置继续工作。
+
+
+## v3.65.0-bitqiu.13 增量验收
+
+- 新增 `internal/fs/nas_concurrency.go`：NAS 1–5 入队名额、真实开始顺序、上限持久化和最新优先暂停；继续使用原复制管理器，不创建额外工作线程池。
+- `internal/fs/nas_tasks_test.go` 增加 8 个共享工作线程下的最多 5 并发、并发提交等待项、5 调为 2 时只暂停最后 3 项、源请求结束、保留字节、提高上限不自动恢复暂停项、恢复后逐字节核对以及重启后保留上限测试。
+- NAS 任务快照增加 `concurrency`，新增管理员 POST `/api/admin/bitqiu/nas/concurrency`，拒绝 0、负数、6 及非整数。页面验证保存、刷新恢复、缩小上限和保存失败后恢复旧值。
+- 增加 `scripts/bitqiu-entrypoint.sh`、`check-downloads.awk`、`test-downloads-mount.py`。挂载解析覆盖无挂载、仅父挂载、含空格路径、NAS 绑定、只读、匿名及命名 Docker 本地卷；镜像 smoke 使用正常启动入口验证拒绝错误配置、拒绝权限不足并在有效绑定下启动，保留登录和 NAS 资产检查。
+- Dockerfile 和 Compose 声明 /downloads，Compose 强制提供已有路径；升级需要新增 NAS 绑定挂载。已有数据和最终文件命名不变，新增设置占用现有表一项，无表结构迁移。
+- 移动端只做可行性评估和 320/360/390/430/768px 视口验证，未修改原 CSS 布局；详见 NAS_PORTRAIT_ASSESSMENT.md。模拟测试不替代真实极空间/iOS/Android 验收。
+
+本地浏览器增量测试和挂载解析测试已通过。Go 依赖下载仍受云环境策略限制，完整 Go/race 和最终镜像启动检查继续作为 GitHub Actions 发布前门禁。以对应提交的 Actions 结果确认最终验收状态。
