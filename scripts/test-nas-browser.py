@@ -12,7 +12,7 @@ with sync_playwright() as p:
  for prefix in ['', '/alist']:
   context=browser.new_context(viewport={'width':1440,'height':1000})
   context.add_init_script("localStorage.setItem('token','fixture-token')")
-  requests=[];errors=[];controls=[];cfg={"limit":5,"order":1,"fail_next":False}
+  requests=[];errors=[];controls=[];cfg={"limit":5,"order":1,"fail_next":False,"duplicate":False,"control_failure":False}
   tasks=[{'id':id,'name':name,'state':state,'progress':25,'total_bytes':104857600,'transferred_bytes':26214400,'speed_bytes_per_second':2097152,'start_time':'2026-01-02T00:00:00Z','restart_required':id=='restart','start_order':1 if id=='active1' else 0} for id,name,state in [('active1','下载 fixture','downloading'),('paused1','暂停 fixture','paused'),('waiting1','等待 fixture','waiting'),('restart','不支持续传 fixture','paused')]]
   tasks.extend({'id':'done'+str(i),'name':'历史 fixture '+str(i),'state':s,'completion_reason':reason,'progress':100 if s=='completed' else 30,'total_bytes':1024,'end_time':f'2026-01-01T00:00:0{i}Z','error':'context deadline exceeded' if reason=='timeout' else ''} for i,(s,reason) in enumerate([('completed','completed'),('canceled','user_canceled'),('failed','timeout'),('failed','failed')]))
   tasks.extend({'id':'older'+str(i),'name':'更早任务 '+str(i),'state':'completed','completion_reason':'completed','end_time':'2025-01-01T00:00:00Z'} for i in range(41))
@@ -32,7 +32,11 @@ with sync_playwright() as p:
      data={'content':files if size==-1 else files[(n-1)*size:n*size],'total':237,'filtered_total':237,'has_more':False if size==-1 else n*size<237}
     elif endpoint=='/admin/bitqiu/nas/stats':requests.append(body);data={'selected_count':len(body['names']),'file_count':3,'known_bytes':1048576,'unknown_count':1}
     elif endpoint=='/admin/bitqiu/nas/dirs':data=[{'path':'电影','label':'电影'}] if body['path']=='/NAS下载' else []
-    elif endpoint=='/admin/bitqiu/nas/download':requests.append(body);data={'tasks':[{'id':'fixture-task'}]}
+    elif endpoint=='/admin/bitqiu/nas/download':
+     requests.append(body)
+     if cfg['duplicate']:
+      r.fulfill(status=200,content_type='application/json',body=json.dumps({'code':409,'message':'重复任务：<文件> 已在下载队列中，请勿重复提交。'}));return
+     data={'tasks':[{'id':'fixture-task'}]}
     elif endpoint=='/admin/bitqiu/nas/tasks':data={'active':[caps(t) for t in tasks if t['state'] not in ['completed','canceled','failed']],'history':[caps(t) for t in tasks if t['state'] in ['completed','canceled','failed']],'concurrency':{'limit':cfg['limit'],'maximum':5,'running':sum(t['state']=='downloading' for t in tasks)}}
     elif endpoint=='/admin/bitqiu/nas/concurrency':
      if cfg['fail_next']:
@@ -42,6 +46,9 @@ with sync_playwright() as p:
      for t in paused:t['state']='paused'
      data={'limit':cfg['limit'],'maximum':5,'running':len(running)-len(paused),'paused':len(paused),'pending':0}
     elif endpoint=='/admin/bitqiu/nas/control':
+     if cfg['control_failure']:
+      cfg['control_failure']=False
+      r.fulfill(status=200,content_type='application/json',body=json.dumps({'code':200,'data':{'success':1,'failed':1,'skipped':2,'details':[{'error':'任务状态已变化，请刷新后重试'}]}}));return
      controls.append(body);assert body['scope'] in ['all','selected'];success=skipped=failed=0
      for task in tasks:
       if body['scope']=='selected' and task['id'] not in body['ids']:continue
@@ -82,6 +89,16 @@ with sync_playwright() as p:
   page.get_by_role('checkbox',name='选择 file-000.txt',exact=True).check();expect(page.locator('#selection-total')).to_contain_text('另有 1 个文件大小未知')
   page.locator('#target-folders button').click();expect(page.locator('#save-to')).to_have_text('/NAS下载/电影')
   page.screenshot(path=str(output/'nas-download-preview.png'),full_page=True)
+  cfg['duplicate']=True;page.locator('#download').click()
+  expect(page.get_by_role('dialog',name='操作失败')).to_be_visible()
+  expect(page.locator('#error-message')).to_have_text('重复任务：<文件> 已在下载队列中，请勿重复提交。')
+  assert page.locator('#error-message').locator('*').count()==0
+  expect(page.locator('#error-close')).to_be_focused()
+  expect(page.locator('#download')).to_be_enabled()
+  expect(page.locator('#selection-count')).to_contain_text('3 项')
+  page.keyboard.press('Escape');expect(page.locator('#error-dialog')).not_to_be_visible()
+  expect(page.locator('#download')).to_be_focused()
+  cfg['duplicate']=False
   page.locator('#download').click();expect(page.locator('#notice')).to_contain_text('已提交 1 个后台任务')
   payload=next(x for x in requests if 'dst_dir' in x)
   assert payload=={'src_dir':'/网盘','dst_dir':'/NAS下载/电影','names':['file-236.txt','file-136.txt','file-000.txt'],'overwrite':False,'skip_existing':False},payload
@@ -96,6 +113,10 @@ with sync_playwright() as p:
   # TEST-05: selected batch scope and checkbox indeterminate state.
   card('active1').get_by_role('checkbox').check();card('paused1').get_by_role('checkbox').check()
   assert page.locator('#task-select-all').evaluate('(e)=>e.indeterminate')
+  cfg['control_failure']=True;page.locator('#batch-pause').click()
+  expect(page.locator('#error-message')).to_contain_text('成功 1 项，失败 1 项，跳过 2 项')
+  expect(page.locator('#error-message')).to_contain_text('任务状态已变化')
+  page.locator('#error-close').click()
   page.locator('#batch-start').click();expect(card('paused1').locator('.task-speed')).to_have_text('2.0 MB/s')
   assert set(controls[-1]['ids'])=={'active1','paused1'} and controls[-1]['scope']=='selected'
   assert next(t for t in tasks if t['id']=='waiting1')['state']=='waiting'
@@ -107,10 +128,17 @@ with sync_playwright() as p:
   page.reload();expect(page.locator('#nas-concurrency')).to_have_value('1')
   cfg['fail_next']=True;page.locator('#nas-concurrency').select_option('2')
   expect(page.locator('#notice')).to_contain_text('fixture 保存失败');expect(page.locator('#nas-concurrency')).to_have_value('1')
+  expect(page.locator('#error-message')).to_have_text('fixture 保存失败');page.locator('#error-close').click()
   page.locator('#nas-concurrency').select_option('3');expect(page.locator('#notice')).to_contain_text('上限已保存为 3 个')
   expect(card('paused1').locator('.task-speed')).to_have_text('已暂停')
   page.locator('#history-tab').click()
   for reason in ['正常结束','用户取消','超时','失败']:assert reason in page.locator('#history-tasks').inner_text()
+  card('done2').get_by_role('button',name='查看详情').click()
+  expect(page.get_by_role('dialog',name='下载错误')).to_be_visible()
+  expect(page.locator('#error-context')).to_have_text('历史 fixture 2')
+  expect(page.locator('#error-message')).to_have_text('context deadline exceeded')
+  page.locator('#error-close').click()
+  page.locator('#tasks-refresh').click();expect(page.locator('#error-dialog')).not_to_be_visible()
   page.locator('#active-tab').click()
   # TEST-06/11: all pause also stops the waiting queue; state survives reload.
   page.locator('#all-pause').click();expect(card('waiting1').locator('.task-speed')).to_have_text('已暂停')
@@ -137,7 +165,27 @@ with sync_playwright() as p:
    page.set_viewport_size({'width':width,'height':844})
    assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'),'horizontal overflow at '+str(width)
    metrics=page.evaluate('''()=>({width:innerWidth,document_height:document.documentElement.scrollHeight,min_button_height:Math.min(...[...document.querySelectorAll('button')].filter(x=>x.getClientRects().length).map(x=>x.getBoundingClientRect().height)),checkbox_width:document.querySelector('#select-page').getBoundingClientRect().width})''')
-   print('PORTRAIT ASSESSMENT',json.dumps(metrics))
+   print('PORTRAIT REGRESSION',json.dumps(metrics))
+   if width<=430:
+    assert metrics['min_button_height']>=44,metrics
+    expect(page.locator('.mobile-nav')).to_be_visible()
+    page.locator('.mobile-nav a').filter(has_text='保存目录').click()
+    box=page.locator('#target-section').bounding_box();assert 60<=box['y']<844,box
+    page.set_viewport_size({'width':width,'height':400})
+    page.locator('#new-folder-name').fill('');page.locator('#mkdir').click()
+    expect(page.locator('#error-dialog')).to_be_visible()
+    if width==390:page.screenshot(path=str(output/'nas-error-mobile-preview.png'))
+    page.locator('#error-message').evaluate("e=>e.textContent='很长的错误说明'.repeat(200)")
+    assert page.locator('#error-dialog').evaluate('e=>e.scrollWidth<=e.clientWidth')
+    page.locator('#error-close').click();expect(page.locator('#error-dialog')).not_to_be_visible()
+    page.set_viewport_size({'width':width,'height':844})
+    page.get_by_role('checkbox',name='选择 file-236.txt',exact=True).check()
+    page.set_viewport_size({'width':844,'height':width})
+    expect(page.get_by_role('checkbox',name='选择 file-236.txt',exact=True)).to_be_checked()
+    page.set_viewport_size({'width':width,'height':844})
+    page.locator('.mobile-nav a').filter(has_text='下载任务').click()
+    expect(page.locator('#selection-count')).to_have_text('已选择：1 项')
+    page.get_by_role('checkbox',name='选择 file-236.txt',exact=True).uncheck()
    if width==390:page.screenshot(path=str(output/'nas-download-mobile-preview.png'),full_page=True)
 
   assert not errors,errors
