@@ -24,10 +24,25 @@
   $('error-close').onclick=()=>$('error-dialog').close();
   $('error-dialog').addEventListener('close',()=>{if(errorOrigin?.isConnected&&!errorOrigin.disabled)errorOrigin.focus({preventScroll:true});else $('tasks-refresh').focus({preventScroll:true});});
   function notice(message,error=false,origin){$('notice').hidden=false;$('notice').className='notice'+(error?' error':'');$('notice').replaceChildren(el('span',message));if(error)showError(message,'操作失败','',origin);}
+  let handoffAuth=null;
+  const handoffKey='alist_nas_auth:'+base;
+  async function restoreLogin(){
+    const fragment=new URLSearchParams(location.hash.slice(1)),ticket=fragment.get('nas-ticket');
+    if(ticket){
+      // Remove the one-time ticket before issuing any other request.
+      history.replaceState(null,'',location.pathname+location.search);
+      const response=await fetch(base+'/api/auth/nas-handoff',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket})});
+      const value=await response.json();
+      if(value.code!==200||!value.data?.token||!value.data?.client_id)throw Error('NAS 登录交接已过期，请返回 AList 首页重新打开 NAS 下载。');
+      handoffAuth=value.data;
+      try{sessionStorage.setItem(handoffKey,JSON.stringify(handoffAuth));}catch{}
+    }else{try{handoffAuth=JSON.parse(sessionStorage.getItem(handoffKey)||'null');}catch{}}
+  }
   // Reuse the official frontend's device identity; never create a second session.
   function requestHeaders(){
     let token,clientID;
-    try{token=localStorage.getItem('token')||'';clientID=localStorage.getItem('alist_client_id')||'';}catch{throw Error('当前浏览器无法读取 AList 登录状态。请允许网站存储，或在 Safari 中打开相同地址并登录。');}
+    try{token=localStorage.getItem('token')||'';clientID=localStorage.getItem('alist_client_id')||'';}catch{if(!handoffAuth)throw Error('当前浏览器无法读取 AList 登录状态。请允许网站存储，或在 Safari 中打开相同地址并登录。');}
+    if(!token&&handoffAuth){token=handoffAuth.token;clientID=handoffAuth.client_id;}
     if(!token)throw Error('此页面未读取到 AList 登录状态。请在当前浏览器登录 AList 管理员账户；极空间 App 内仍失败时，可用 Safari 打开相同地址登录。');
     if(!clientID)throw Error('未读取到 AList 设备标识，请返回 AList 首页后重新登录，再打开 NAS 下载。');
     return {Authorization:token,'Client-Id':clientID,'Content-Type':'application/json'};
@@ -176,5 +191,5 @@
   $('history-clear-all').onclick=run(()=>clearHistory('all'));
   $('history-clear-selected').onclick=run(()=>clearHistory('selected',state.history.flatMap(taskIDs).filter(id=>state.taskSelected.has(id))));
   $('tasks-refresh').onclick=run(loadTasks);
-  run(targets)();setInterval(()=>{if(!document.hidden)loadTasks().catch(()=>{});},4000);
+  run(async()=>{await restoreLogin();await targets();setInterval(()=>{if(!document.hidden)loadTasks().catch(()=>{});},4000);})();
 })();

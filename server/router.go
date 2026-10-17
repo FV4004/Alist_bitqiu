@@ -71,6 +71,7 @@ func Init(e *gin.Engine) {
 	webauthn := api.Group("/authn", middlewares.Authn)
 
 	api.POST("/auth/login", handles.Login)
+	api.POST("/auth/nas-handoff", nasui.RedeemHandoff)
 	api.POST("/auth/login/hash", handles.LoginHash)
 	api.POST("/auth/login/ldap", handles.LoginLdap)
 	api.POST("/auth/register", handles.Register)
@@ -132,6 +133,7 @@ func Init(e *gin.Engine) {
 func admin(g *gin.RouterGroup) {
 	nas := g.Group("/bitqiu/nas")
 	nas.GET("/targets", handles.BitQiuNASTargets)
+	nas.POST("/handoff", nasui.IssueHandoff)
 	nas.POST("/enable", handles.BitQiuNASEnable)
 	nas.POST("/dirs", handles.BitQiuNASDirs)
 	nas.POST("/entries", handles.BitQiuNASEntries)

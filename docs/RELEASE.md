@@ -52,4 +52,4 @@ v3.65.0-bitqiu.16：NAS 左侧目录取消每页数量与分页按钮，BitQiu �
 
 ## v3.65.0-bitqiu.17
 
-修正 NAS 入口和请求遗漏 AList `Client-Id` 的问题，复用官方前端的设备会话，避免设备限制下误判为新的设备。登录、设备上限、会话失效和管理员权限错误分别提示。添加 Chromium/WebKit 认证回归，保留服务端 Auth + AuthAdmin 校验；不修改数据库、BitQiu 登录数据或 Docker 挂载规则。极空间 iOS App 的独立窗口登录状态仍需实机确认。
+修正 NAS 入口和请求遗漏 AList `Client-Id` 的问题，复用官方前端的设备会话，避免设备限制下误判为新的设备。登录、设备上限、会话失效和管理员权限错误分别提示。添加 Chromium/WebKit 认证回归，保留服务端 Auth + AuthAdmin 校验；不修改数据库、BitQiu 登录数据或 Docker 挂载规则。增加管理员一次性登录交接，兼容新页面无法读取原窗口 localStorage 的情况；票据 60 秒过期、只能兑换一次，登录令牌不放入 URL。极空间 iOS App 仍需实机验证。

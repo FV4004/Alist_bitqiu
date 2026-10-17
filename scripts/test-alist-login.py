@@ -104,6 +104,10 @@ async def check_nas_navigation(browser, prefix):
             response = {'code': 200, 'data': []}
             if path == '/api/public/settings':
                 response['data'] = {'site_title': 'AList', 'pagination_type': 'all', 'default_page_size': '50', 'version': 'fixture', 'logo': '', 'favicon': ''}
+            elif path == '/api/admin/bitqiu/nas/handoff':
+                response['data'] = {'ticket': 'fixture-ticket'}
+            elif path == '/api/auth/nas-handoff':
+                response['data'] = {'token': 'fixture-token', 'client_id': 'fixture-device'}
             elif path == '/api/me':
                 response['data'] = {'id': 1, 'username': 'admin', 'role': [2], 'base_path': '/', 'permission': 65535}
             elif path == '/api/fs/get':

@@ -21,7 +21,7 @@
     if(!allowed)return;
     if(anchor){anchor.href=destination();return;}
     // AList's client router leaves anchors with a target to the browser.
-    const a=document.createElement('a');a.id='alist-nas-download';a.textContent='↓ NAS 下载';a.href=destination();a.target='_self';a.onclick=()=>{a.href=destination();};a.title='选择网盘文件并下载到 NAS';a.style.cssText='position:fixed;right:18px;bottom:18px;z-index:9999;padding:10px 16px;border-radius:24px;background:#136b67;color:white;font:600 14px system-ui;text-decoration:none;box-shadow:0 3px 15px #0002';document.body.append(a);
+    const a=document.createElement('a');a.id='alist-nas-download';a.textContent='↓ NAS 下载';a.href=destination();a.target='_self';a.onclick=async event=>{event.preventDefault();if(a.dataset.busy)return;a.dataset.busy='1';a.textContent='正在打开 NAS…';try{const r=await fetch(base+'/api/admin/bitqiu/nas/handoff',{method:'POST',headers:{Authorization:token,'Client-Id':clientID}});const v=await r.json();if(v.code!==200||!v.data?.ticket)throw Error(v.message||'登录交接失败，请重新登录。');location.assign(destination()+'#nas-ticket='+encodeURIComponent(v.data.ticket));}catch(error){window.alert('无法打开 NAS 下载：'+error.message);}finally{delete a.dataset.busy;a.textContent='↓ NAS 下载';}};a.title='选择网盘文件并下载到 NAS';a.style.cssText='position:fixed;right:18px;bottom:18px;z-index:9999;padding:10px 16px;border-radius:24px;background:#136b67;color:white;font:600 14px system-ui;text-decoration:none;box-shadow:0 3px 15px #0002';document.body.append(a);
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mount);else mount();setInterval(mount,2500);
 })();
