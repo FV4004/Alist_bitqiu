@@ -112,3 +112,16 @@ python scripts/test-nas-browser.py
 主要修改：`server/nasui/web/{icons.js,app.js,index.html,style.css}`；`server/handles/bitqiu_nas_{plan,tasks}.go`；`internal/fs/nas_{tasks,transfer,conflicts,history}.go`；路由、对应 Go/浏览器测试及检查分支 CI。原镜像构建流程保留，仅升级应用版本标签。
 
 检查结果：两轮 NAS 检查均通过。首轮：https://github.com/FV4004/Alist_bitqiu/actions/runs/39002637361 ；包含历史清理强化、临时文件/持久化失败回归及整组暂停的最终轮：https://github.com/FV4004/Alist_bitqiu/actions/runs/39003423230 。两轮均执行 Go race、完整官方登录页及 Chromium NAS 回归，无测试失败。
+
+
+## v3.65.0-bitqiu.16：目录流与 NAS 分类
+
+- 驱动：首批回调先于后续接口请求；去重后逐批返回；后续错误和回调取消仍返回失败而非部分成功；普通 API 保留原行为。
+- 接口：真实 flush 首批，后续批次等待时普通读者不能命中部分缓存；失败无 done、完成数量为直接条目数；右侧文件和链接可见但禁选，路径仍受 NAS 挂载约束。
+- 浏览器：无每页数量和网盘分页按钮，237 项全目录勾选/取消、排序不重复请求；右侧分类多选、空分类、重置 8 类全选、非目录禁选；加载失败保留标记为不完整的内容并禁止提交。
+- 实际 HTTP 浏览器：阻塞第二批并在释放前断言第一批已经可见；UTF-8 名称、done、后续 error、缺失 done 的断流，分别覆盖根路径和 /alist 前缀。
+- 原协议、登录导航、NAS 目录/权限/下载/并发/历史及 320–768px 竖屏回归保留。
+
+新增文件：`server/handles/bitqiu_nas_stream.go`、`scripts/test-nas-stream.py`。修改 BitQiu 两种模式分页回调、可选 ListArgs.OnPage 与 op.List 请求隔离、NAS 页面和原有验收脚本。无数据库或 Docker 挂载迁移。分类仅修改右侧保存目录；左侧负责流式目录和排序。
+
+最终检查通过：https://github.com/FV4004/Alist_bitqiu/actions/runs/39010377357 。BitQiu 协议及 NAS 后端 race、完整官方登录页、NAS 界面与两种路径前缀的实际 HTTP 流式测试全部通过。实际 HTTP 用例在第二批仍被阻塞时验证第一批可见，并覆盖后续错误与缺失 done 的断流；测试服务的 GET 入口配置已修正。

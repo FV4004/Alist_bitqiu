@@ -186,7 +186,7 @@ func List(ctx context.Context, storage driver.Driver, path string, args model.Li
 	if !dir.IsDir() {
 		return nil, errors.WithStack(errs.NotFolder)
 	}
-	objs, err, _ := listG.Do(key, func() ([]model.Obj, error) {
+	load := func() ([]model.Obj, error) {
 		files, err := storage.List(ctx, dir, args)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to list objs")
@@ -222,7 +222,13 @@ func List(ctx context.Context, storage driver.Driver, path string, args model.Li
 			}
 		}
 		return files, nil
-	})
+	}
+	// A streaming callback belongs to one request. Sharing it through singleflight
+	// would send data to the wrong response or suppress all early batches.
+	if args.OnPage != nil {
+		return load()
+	}
+	objs, err, _ := listG.Do(key, load)
 	return objs, err
 }
 

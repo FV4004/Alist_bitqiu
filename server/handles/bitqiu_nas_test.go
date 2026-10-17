@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,7 +29,34 @@ import (
 
 // Local fixtures exercise the real copy queue and Local.Put without an account
 // or any dependency on the live BitQiu service.
-type nasFixtureDriver struct{ local.Local }
+type nasFixtureDriver struct {
+	local.Local
+	streamHook func(context.Context, []model.Obj, model.ListArgs) ([]model.Obj, error)
+}
+
+func (d *nasFixtureDriver) List(ctx context.Context, dir model.Obj, args model.ListArgs) ([]model.Obj, error) {
+	files, err := d.Local.List(ctx, dir, args)
+	if err != nil {
+		return nil, err
+	}
+	if args.OnPage != nil && d.streamHook != nil {
+		return d.streamHook(ctx, files, args)
+	}
+	return files, nil
+}
+
+type nasFlushRecorder struct {
+	*httptest.ResponseRecorder
+	frames chan string
+}
+
+func (w *nasFlushRecorder) Flush() {
+	w.ResponseRecorder.Flush()
+	select {
+	case w.frames <- w.Body.String():
+	default:
+	}
+}
 
 func (*nasFixtureDriver) Config() driver.Config {
 	return driver.Config{Name: "BitQiu", LocalSort: true}
@@ -187,6 +216,76 @@ func TestBitQiuNASIntegration(t *testing.T) {
 			t.Fatal("accepted invalid sort")
 		}
 	})
+
+	t.Run("stream flushes provisional batch and never caches incomplete listing", func(t *testing.T) {
+		driver, _ := op.GetStorageByMountPath("/cloud")
+		fixture := driver.(*nasFixtureDriver)
+		for _, failed := range []bool{false, true} {
+			op.ClearCache(driver, "/")
+			gate := make(chan struct{})
+			done := make(chan struct{})
+			fixture.streamHook = func(ctx context.Context, files []model.Obj, args model.ListArgs) ([]model.Obj, error) {
+				if err := args.OnPage(files[:1]); err != nil {
+					return nil, err
+				}
+				select {
+				case <-gate:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+				if failed {
+					return nil, errors.New("fixture page2 failed")
+				}
+				return files, nil
+			}
+			w := &nasFlushRecorder{ResponseRecorder: httptest.NewRecorder(), frames: make(chan string, 8)}
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest("POST", "/", strings.NewReader(`{"path":"/cloud","refresh":true}`))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Set("user", &model.User{ID: 1, BasePath: "/", Role: model.Roles{2}})
+			go func() { defer close(done); BitQiuNASListStream(c) }()
+			early := false
+			timer := time.NewTimer(5 * time.Second)
+			for !early {
+				select {
+				case frame := <-w.frames:
+					early = strings.Contains(frame, `"event":"batch"`)
+				case <-timer.C:
+					close(gate)
+					<-done
+					t.Fatal("no early stream batch")
+				}
+			}
+			timer.Stop()
+			select {
+			case <-done:
+				t.Fatal("stream completed before upstream released")
+			default:
+			}
+			// A normal reader must get the full directory, never the provisional item.
+			cached, err := op.List(context.Background(), driver, "/", model.ListArgs{})
+			if err != nil || len(cached) != 238 {
+				close(gate)
+				<-done
+				t.Fatalf("partial cache: %d %v", len(cached), err)
+			}
+			close(gate)
+			<-done
+			fixture.streamHook = nil
+			body := w.Body.String()
+			if failed {
+				if strings.Contains(body, `"event":"done"`) || !strings.Contains(body, "fixture page2 failed") {
+					t.Fatal("failure falsely completed", body)
+				}
+			} else if !strings.Contains(body, `"total":238`) {
+				t.Fatal("missing final count", body)
+			}
+			if w.Header().Get("X-Accel-Buffering") != "no" || w.Header().Get("X-Content-Type-Options") != "nosniff" || !strings.Contains(w.Header().Get("Content-Type"), "application/x-ndjson") {
+				t.Fatal("stream buffered or mislabelled")
+			}
+		}
+		op.ClearCache(driver, "/")
+	})
 	t.Run("visual directories and confinement", func(t *testing.T) {
 		requireOK(t, invoke(BitQiuNASMkdir, map[string]string{"path": "/nas", "name": "Movies"}, true))
 		result := invoke(BitQiuNASDirs, map[string]string{"path": "/nas"}, true)
@@ -207,6 +306,44 @@ func TestBitQiuNASIntegration(t *testing.T) {
 		}
 		if code(invoke(BitQiuNASDirs, map[string]string{"path": "/cloud"}, true)) == 200 {
 			t.Fatal("accepted non-Local destination")
+		}
+	})
+
+	t.Run("NAS entries include disabled files and links without changing dirs API", func(t *testing.T) {
+		if err := os.WriteFile(filepath.Join(dest, "existing.mp4"), []byte("existing"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		result := invoke(BitQiuNASEntries, map[string]string{"path": "/nas"}, true)
+		requireOK(t, result)
+		var entries []nasListedItem
+		if err := json.Unmarshal(result["data"], &entries); err != nil {
+			t.Fatal(err)
+		}
+		foundFile, foundDir, foundLink := false, false, false
+		for _, entry := range entries {
+			switch entry.Name {
+			case "existing.mp4":
+				foundFile = true
+				if entry.IsDir || entry.Selectable || !entry.SizeKnown {
+					t.Fatal("file selectable", entry)
+				}
+			case "Movies":
+				foundDir = true
+				if !entry.IsDir || !entry.Selectable {
+					t.Fatal("directory disabled", entry)
+				}
+			case "escape":
+				foundLink = true
+				if entry.Selectable || entry.IsDir {
+					t.Fatal("symlink selectable", entry)
+				}
+			}
+		}
+		if !foundFile || !foundDir || !foundLink {
+			t.Fatal("NAS objects missing", entries)
+		}
+		if code(invoke(BitQiuNASEntries, map[string]string{"path": "/nas/escape"}, true)) == 200 {
+			t.Fatal("entries escaped NAS mount")
 		}
 	})
 	t.Run("background file and recursive downloads", func(t *testing.T) {

@@ -561,3 +561,48 @@ func TestClientObjectDistinguishesUnknownAndEmptySize(t *testing.T) {
 		}
 	}
 }
+
+func TestDirectoryPageCallbackIsEarlyDeduplicatedAndAllOrNothing(t *testing.T) {
+	for _, mode := range []string{"complete", "fail", "cancel"} {
+		t.Run(mode, func(t *testing.T) {
+			var requests atomic.Int32
+			d := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				_ = r.ParseForm()
+				if r.Form.Get("sort") == "" {
+					reply(w, 10200, map[string]interface{}{"hasNext": true, "data": []map[string]interface{}{{"resourceId": "folder", "name": "Folder", "resourceType": 1, "sort": "cursor"}}})
+					return
+				}
+				if mode == "fail" {
+					reply(w, 59999, nil)
+					return
+				}
+				reply(w, 10200, map[string]interface{}{"hasNext": false, "data": []map[string]interface{}{{"resourceId": "folder", "name": "Folder", "resourceType": 1, "sort": "cursor"}, {"resourceId": "file", "name": "File", "resourceType": 2, "size": 12}}})
+			})
+			d.state = clientState{Token: "secret", OpenID: "open", UserID: "1"}
+			batches := []int{}
+			files, err := d.List(context.Background(), &model.Object{ID: "root", IsFolder: true}, model.ListArgs{OnPage: func(objects []model.Obj) error {
+				if len(batches) == 0 && requests.Load() != 1 {
+					t.Error("first batch waited for later requests")
+				}
+				batches = append(batches, len(objects))
+				if mode == "cancel" {
+					return context.Canceled
+				}
+				return nil
+			}})
+			if mode == "complete" {
+				if err != nil || len(files) != 2 || len(batches) != 2 || batches[0] != 1 || batches[1] != 1 {
+					t.Fatalf("bad batches/results: %v %v %v", batches, files, err)
+				}
+			} else {
+				if err == nil || len(files) != 0 || len(batches) != 1 {
+					t.Fatalf("partial list returned as complete: %v %v", files, err)
+				}
+				if mode == "cancel" && requests.Load() != 1 {
+					t.Fatal("continued requesting after consumer canceled")
+				}
+			}
+		})
+	}
+}

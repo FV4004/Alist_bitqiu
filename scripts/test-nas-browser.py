@@ -24,14 +24,14 @@ with sync_playwright() as p:
    if '/api/' in path:
     endpoint=path.split('/api',1)[1];body=r.request.post_data_json if r.request.post_data else None;data=None
     if endpoint=='/admin/bitqiu/nas/targets':data={'cloud':[{'path':'/网盘','label':'/网盘'}],'targets':[{'path':'/NAS下载','label':'/NAS下载'}],'downloads_ready':True,'downloads_enabled':True}
-    elif endpoint=='/fs/list':
-     requests.append(body);n,size=body['page'],body['per_page']
-     assert body['order_by'] in ['modified','name','size'] and body['order_direction'] in ['asc','desc'],body
+    elif endpoint=='/admin/bitqiu/nas/list-stream':
+     requests.append(body)
      files=[{'name':f'file-{i:03d}.txt','is_dir':i==235,'size':0 if i==1 else 12345+i,'size_known':i!=0,'modified':(datetime(2026,1,1,tzinfo=timezone.utc)+timedelta(hours=i)).isoformat()} for i in range(237)]
-     files.sort(key=lambda f:f[body['order_by']],reverse=body['order_direction']=='desc')
-     data={'content':files if size==-1 else files[(n-1)*size:n*size],'total':237,'filtered_total':237,'has_more':False if size==-1 else n*size<237}
+     frames=[{'event':'start'}]+[{'event':'batch','content':files[i:i+24]} for i in range(0,len(files),24)]+[{'event':'done','total':237}]
+     if cfg.get('stream_fail'):frames=frames[:2]+[{'event':'error','message':'fixture 后续页失败'}]
+     r.fulfill(status=200,content_type='application/x-ndjson',body=''.join(json.dumps(frame,ensure_ascii=False)+'\n' for frame in frames));return
     elif endpoint=='/admin/bitqiu/nas/stats':requests.append(body);data={'selected_count':len(body['names']),'file_count':3,'known_bytes':1048576,'unknown_count':1}
-    elif endpoint=='/admin/bitqiu/nas/dirs':data=[{'path':'电影','label':'电影'}] if body['path']=='/NAS下载' else []
+    elif endpoint=='/admin/bitqiu/nas/entries':data=[{'path':'电影','name':'电影','label':'电影','is_dir':True,'selectable':True},{'name':'已有视频.mp4','path':'已有视频.mp4','is_dir':False,'selectable':False,'size':1024,'size_known':True},{'name':'说明.pdf','path':'说明.pdf','is_dir':False,'selectable':False,'size':50,'size_known':True}] if body['path']=='/NAS下载' else []
     elif endpoint=='/admin/bitqiu/nas/prepare':
      requests.append(body)
      if cfg['duplicate']:
@@ -69,10 +69,10 @@ with sync_playwright() as p:
    r.fulfill(status=200,content_type='text/html' if name.endswith('.html') else 'text/css' if name.endswith('.css') else 'application/javascript',body=(root/name).read_bytes())
   page.route('https://nas.example/**',route);page.goto('https://nas.example'+prefix+'/@nas')
   expect(page.locator('#source-count')).to_have_text('共 237 项 · 已选 0 项')
-  expect(page.locator('#source-files input')).to_have_count(100)
-  # TEST-01/02: all directory entries across three pages, individual deselection.
+  expect(page.locator('#source-files input')).to_have_count(237)
+  # TEST-01/02: all direct children in one streamed list, individual deselection.
   page.locator('#select-page').check();expect(page.locator('#source-count')).to_have_text('共 237 项 · 已选 237 项')
-  expect(page.locator('#source-files input:checked')).to_have_count(100)
+  expect(page.locator('#source-files input:checked')).to_have_count(237)
   page.get_by_role('checkbox',name='选择 file-236.txt',exact=True).uncheck()
   assert page.locator('#select-page').evaluate('(e)=>e.indeterminate')
   page.get_by_role('checkbox',name='选择 file-236.txt',exact=True).check();expect(page.locator('#select-page')).to_be_checked()
@@ -85,12 +85,25 @@ with sync_playwright() as p:
   expect(page.locator('#selection-count')).to_have_text('已选择：2 项（包含 3 个文件）')
   expect(page.locator('#selection-total')).to_contain_text('另有 1 个文件大小未知')
   page.get_by_role('checkbox',name='选择 file-235.txt',exact=True).uncheck()
-  page.locator('#source-next').click();expect(page.locator('#source-page')).to_have_text('第 2 / 3 页')
   page.get_by_role('checkbox',name='选择 file-136.txt',exact=True).check()
-  page.locator('#source-next').click();expect(page.locator('#source-page')).to_have_text('第 3 / 3 页')
-  expect(page.locator('#source-files input')).to_have_count(37);expect(page.locator('#source-next')).to_be_disabled()
   page.get_by_role('checkbox',name='选择 file-000.txt',exact=True).check();expect(page.locator('#selection-total')).to_contain_text('另有 1 个文件大小未知')
-  page.locator('#target-folders button').click();expect(page.locator('#save-to')).to_have_text('/NAS下载/电影')
+  expect(page.locator('#page-size')).to_have_count(0)
+  expect(page.locator('#source-next')).to_have_count(0)
+  expect(page.locator('#source-prev')).to_have_count(0)
+  expect(page.locator('#source-loading')).to_contain_text('每个文件夹仅计 1 项')
+  expect(page.get_by_role('button',name='不可选择文件 已有视频.mp4')).to_be_disabled()
+  page.locator('#target-filter-summary').click()
+  for check in page.locator('#target-filter-options input').all():check.uncheck()
+  expect(page.locator('#target-count')).to_have_text('显示 0 / 3 项')
+  page.locator('#target-filter-options').get_by_role('checkbox',name='视频',exact=True).check()
+  page.locator('#target-filter-options').get_by_role('checkbox',name='文档',exact=True).check()
+  expect(page.locator('#target-count')).to_have_text('显示 2 / 3 项')
+  expect(page.locator('#target-folders button:enabled')).to_have_count(0)
+  page.locator('#target-filter-reset').click()
+  expect(page.locator('#target-filter-options input:checked')).to_have_count(8)
+  expect(page.locator('#target-count')).to_have_text('显示 3 / 3 项')
+  page.locator('#target-filter-summary').click()
+  page.get_by_role('button',name='打开 NAS 文件夹 电影',exact=True).click();expect(page.locator('#save-to')).to_have_text('/NAS下载/电影')
   page.screenshot(path=str(output/'nas-download-preview.png'),full_page=True)
   cfg['duplicate']=True;page.locator('#download').click()
   expect(page.get_by_role('dialog',name='操作失败')).to_be_visible()
@@ -180,8 +193,10 @@ with sync_playwright() as p:
   expect(page.locator('#history-tasks .task')).to_have_count(20)
   page.locator('#history-next').click();page.locator('#history-next').click();expect(page.locator('#history-tasks .task')).to_have_count(9)
   expect(page.locator('#history-next')).to_be_disabled()
+  request_count=len([r for r in requests if 'refresh' in r])
   for sort,name in [('name:asc','file-000.txt'),('modified:asc','file-000.txt'),('size:desc','file-236.txt')]:
    page.locator('#sort-order').select_option(sort);expect(page.locator('#source-files tr').first.locator('.file-heading')).to_contain_text(name)
+  assert len([r for r in requests if 'refresh' in r])==request_count
   expect(page.locator('#source-files .file-meta').first).to_contain_text('KB · 修改于')
   for width in [320,360,390,430,768]:
    page.set_viewport_size({'width':width,'height':844})
@@ -230,6 +245,14 @@ with sync_playwright() as p:
   expect(page.locator('#history-count')).to_have_text('0')
   assert requests[-1]['remove_partials'] is True and requests[-1]['scope']=='all'
   for element in page.locator('#source-files .type-icon').all():assert element.get_attribute('viewBox')=='0 0 24 24'
+  cfg['stream_fail']=True;page.locator('#source-refresh').click()
+  expect(page.locator('#error-message')).to_have_text('fixture 后续页失败')
+  page.locator('#error-close').click()
+  expect(page.locator('#source-loading')).to_contain_text('当前结果不完整')
+  expect(page.locator('#source-files input')).to_have_count(24)
+  expect(page.locator('#select-page')).to_be_disabled();expect(page.locator('#download')).to_be_disabled()
+  cfg['stream_fail']=False;page.locator('#source-refresh').click()
+  expect(page.locator('#source-count')).to_have_text('共 237 项 · 已选 0 项')
   assert not errors,errors
   print('PASS TEST-01/02/03/04/05/06/07/09/10/11/12 UI; backend termination/resume verified separately in Go; prefix='+repr(prefix));context.close()
  browser.close()

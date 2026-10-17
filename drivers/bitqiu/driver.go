@@ -106,7 +106,7 @@ func (d *BitQiu) Drop(ctx context.Context) error {
 
 func (d *BitQiu) List(ctx context.Context, dir model.Obj, args model.ListArgs) ([]model.Obj, error) {
 	if d.windowsMode() {
-		return d.listWindows(ctx, dir)
+		return d.listWindowsPages(ctx, dir, args.OnPage)
 	}
 	if d.userID == "" {
 		if err := d.login(ctx); err != nil {
@@ -158,6 +158,11 @@ func (d *BitQiu) List(ctx context.Context, dir model.Obj, args model.ListArgs) (
 			return nil, err
 		}
 		results = append(results, objs...)
+		if args.OnPage != nil {
+			if err := args.OnPage(objs); err != nil {
+				return nil, err
+			}
+		}
 
 		if !resp.Data.HasNext || len(resp.Data.Data) == 0 {
 			break

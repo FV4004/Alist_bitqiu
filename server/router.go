@@ -134,6 +134,8 @@ func admin(g *gin.RouterGroup) {
 	nas.GET("/targets", handles.BitQiuNASTargets)
 	nas.POST("/enable", handles.BitQiuNASEnable)
 	nas.POST("/dirs", handles.BitQiuNASDirs)
+	nas.POST("/entries", handles.BitQiuNASEntries)
+	nas.POST("/list-stream", handles.BitQiuNASListStream)
 	nas.POST("/mkdir", handles.BitQiuNASMkdir)
 	nas.POST("/download", handles.BitQiuNASDownload)
 	nas.POST("/prepare", handles.BitQiuNASPrepare)
