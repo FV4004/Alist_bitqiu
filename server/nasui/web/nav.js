@@ -12,11 +12,12 @@
   let checkedToken='',allowed=false,pending=false;
   function destination(){let path='/';try{path=decodeURIComponent(location.pathname.slice(base.length))||'/';}catch{}if(path.startsWith('/@'))path='/';return base+'/@nas?path='+encodeURIComponent(path);}
   function mount(){
-    let token;try{token=localStorage.getItem('token')||'';}catch{return;}
+    let token,clientID;try{token=localStorage.getItem('token')||'';clientID=localStorage.getItem('alist_client_id')||'';}catch{return;}
+    const identity=token+'\n'+clientID;
     let anchor=document.getElementById('alist-nas-download');
-    if(token!==checkedToken){anchor?.remove();anchor=null;allowed=false;}
-    if(!token){checkedToken='';return;}
-    if(checkedToken!==token&&!pending){pending=true;checkedToken=token;fetch(base+'/api/me',{headers:{Authorization:token}}).then(r=>r.json()).then(r=>{if(checkedToken===token)allowed=r.code===200&&r.data?.role?.includes(2);}).catch(()=>{checkedToken='';}).finally(()=>{pending=false;if(allowed)mount();});return;}
+    if(identity!==checkedToken){anchor?.remove();anchor=null;allowed=false;}
+    if(!token||!clientID){anchor?.remove();checkedToken='';allowed=false;return;}
+    if(checkedToken!==identity&&!pending){pending=true;checkedToken=identity;fetch(base+'/api/me',{headers:{Authorization:token,'Client-Id':clientID}}).then(r=>r.json()).then(r=>{if(checkedToken===identity)allowed=r.code===200&&r.data?.role?.includes(2);}).catch(()=>{checkedToken='';}).finally(()=>{pending=false;if(allowed)mount();});return;}
     if(!allowed)return;
     if(anchor){anchor.href=destination();return;}
     // AList's client router leaves anchors with a target to the browser.

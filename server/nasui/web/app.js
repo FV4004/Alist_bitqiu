@@ -24,7 +24,24 @@
   $('error-close').onclick=()=>$('error-dialog').close();
   $('error-dialog').addEventListener('close',()=>{if(errorOrigin?.isConnected&&!errorOrigin.disabled)errorOrigin.focus({preventScroll:true});else $('tasks-refresh').focus({preventScroll:true});});
   function notice(message,error=false,origin){$('notice').hidden=false;$('notice').className='notice'+(error?' error':'');$('notice').replaceChildren(el('span',message));if(error)showError(message,'操作失败','',origin);}
-  async function api(path,body,signal){let token='';try{token=localStorage.getItem('token')||'';}catch{}const r=await fetch(base+'/api'+path,{method:body===undefined?'GET':'POST',headers:{Authorization:token,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal});let v;try{v=await r.json();}catch{throw Error('服务未返回 JSON，请确认容器已更新。');}if(v.code!==200){if(v.code===401||v.code===403)throw Error('请先使用 AList 管理员账号登录。');throw Error(v.message||'操作失败');}return v.data;}
+  // Reuse the official frontend's device identity; never create a second session.
+  function requestHeaders(){
+    let token,clientID;
+    try{token=localStorage.getItem('token')||'';clientID=localStorage.getItem('alist_client_id')||'';}catch{throw Error('当前浏览器无法读取 AList 登录状态。请允许网站存储，或在 Safari 中打开相同地址并登录。');}
+    if(!token)throw Error('此页面未读取到 AList 登录状态。请在当前浏览器登录 AList 管理员账户；极空间 App 内仍失败时，可用 Safari 打开相同地址登录。');
+    if(!clientID)throw Error('未读取到 AList 设备标识，请返回 AList 首页后重新登录，再打开 NAS 下载。');
+    return {Authorization:token,'Client-Id':clientID,'Content-Type':'application/json'};
+  }
+  function apiError(value,status){
+    const code=Number(value?.code||status),message=String(value?.message||'');
+    if(message.includes('too many active devices'))return 'AList 活跃设备数量已达上限，请在会话管理中退出不再使用的设备后重试。';
+    if(message.includes('session inactive'))return '当前 AList 设备会话已失效，请在当前浏览器重新登录。';
+    if(code===401)return 'AList 登录已失效，请在当前浏览器重新登录。';
+    if(code===403&&message.includes('You are not an admin'))return 'NAS 下载仅对 AList 管理员开放，请切换为具有管理员角色的账户。';
+    if(code===403)return 'AList 拒绝了此请求：'+(message||'请检查设备会话及账户权限。');
+    return message||'操作失败';
+  }
+  async function api(path,body,signal){const r=await fetch(base+'/api'+path,{method:body===undefined?'GET':'POST',headers:requestHeaders(),body:body===undefined?undefined:JSON.stringify(body),signal});let v;try{v=await r.json();}catch{throw Error('服务未返回 JSON，请确认容器已更新。');}if(v.code!==200)throw Error(apiError(v,r.status));return v.data;}
   const run = fn => (...args) => {const origin=document.activeElement;return Promise.resolve().then(()=>fn(...args)).catch(e=>notice(e.message,true,origin));};
   let selectionKey='',statsTimer,statsController,statsSeq=0;
   function clearSelection(){state.selectionEpoch++;state.selected.clear();state.selectedMeta.clear();selectionKey='';selectedUI();}
@@ -58,11 +75,10 @@
     const seq=++state.sourceSeq;state.sourceController?.abort();state.sourceController=new AbortController();const signal=state.sourceController.signal;
     state.items=[];state.total=0;state.sourceRows=new Map();state.sourceComplete=false;state.loading=!!state.source;$('source-path').textContent=state.source;$('source-up').disabled=!state.source||state.source===state.sourceRoot;
     $('source-loading').textContent=state.source?'正在连接，目录内容将逐批显示…':'请选择 BitQiu 存储';renderSource();if(!state.source)return;
-    let token='';try{token=localStorage.getItem('token')||'';}catch{}
     let reader;
     try{
-      const response=await fetch(base+'/api/admin/bitqiu/nas/list-stream',{method:'POST',headers:{Authorization:token,'Content-Type':'application/json'},body:JSON.stringify({path:state.source,refresh}),signal});
-      if(!response.ok||!(response.headers.get('content-type')||'').includes('application/x-ndjson')){let value;try{value=await response.json();}catch{};throw Error(value?.code===401||value?.code===403?'请先使用 AList 管理员账号登录。':value?.message||'目录服务未返回有效内容，请确认容器已更新。');}
+      const response=await fetch(base+'/api/admin/bitqiu/nas/list-stream',{method:'POST',headers:requestHeaders(),body:JSON.stringify({path:state.source,refresh}),signal});
+      if(!response.ok||!(response.headers.get('content-type')||'').includes('application/x-ndjson')){let value;try{value=await response.json();}catch{};throw Error(value?apiError(value,response.status):'目录服务未返回有效内容，请确认容器已更新。');}
       if(!response.body)throw Error('当前浏览器无法读取目录，请更新浏览器后重试。');
       reader=response.body.getReader();const decoder=new TextDecoder(),known=new Map();let pending='',doneFrame=null;
       const frame=line=>{if(!line.trim())return;const value=JSON.parse(line);if(doneFrame)throw Error('目录响应异常，请刷新重试。');if(value.event==='error')throw Error(value.message||'目录读取未完成，请刷新重试。');if(value.event==='batch'){if(!Array.isArray(value.content))throw Error('目录内容格式异常');for(const file of value.content){if(typeof file.name!=='string')throw Error('目录名称格式异常');known.set(file.name,file);}state.items=[...known.values()];state.total=known.size;$('source-loading').textContent=`正在加载 · 已读取 ${state.total} 项（仅统计当前目录，不包含子目录内部文件）`;renderSource();}else if(value.event==='done')doneFrame=value;else if(value.event!=='start')throw Error('目录响应格式异常');};

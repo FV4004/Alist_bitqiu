@@ -39,7 +39,7 @@ for prefix in ['', '/alist']:
  server=ThreadingHTTPServer(('127.0.0.1',0),Handler);thread=Thread(target=server.serve_forever,daemon=True);thread.start()
  with sync_playwright() as p:
   browser=p.chromium.launch(executable_path=os.environ.get('CHROMIUM_PATH') or ('/usr/bin/chromium' if Path('/usr/bin/chromium').exists() else None),headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
-  page=browser.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+  page=browser.new_page();page.add_init_script("localStorage.setItem('token','fixture-token');localStorage.setItem('alist_client_id','fixture-device')");errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
   page.goto(f'http://127.0.0.1:{server.server_port}'+prefix+'/@nas')
   try:expect(page.locator('#source-files input')).to_have_count(2)
   except Exception:

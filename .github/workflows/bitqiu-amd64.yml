@@ -41,11 +41,12 @@ jobs:
       - name: Test official login and navigation to NAS downloads
         run: |
           python -m pip install playwright==1.62.0
-          python -m playwright install --with-deps chromium
+          python -m playwright install --with-deps chromium webkit
           python scripts/test-downloads-mount.py
           python scripts/test-alist-login.py
           python scripts/test-nas-browser.py
           python scripts/test-nas-stream.py
+          python scripts/test-nas-auth.py
       - name: Install musl toolchain for static SQLite support
         run: sudo apt-get update -qq && sudo apt-get install -y musl-tools
       - name: Build linux amd64 binary
