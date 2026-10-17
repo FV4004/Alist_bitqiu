@@ -18,6 +18,7 @@ jobs:
           cache: true
       - name: Test NAS backend with race detector
         run: |
+          go test -race ./drivers/bitqiu
           go test -race ./internal/fs -run '^TestNAS'
           go test -race ./server/handles -run '^Test(BitQiuNASIntegration|NASTaskInfo)$'
           go test -race ./server/nasui
@@ -36,6 +37,7 @@ jobs:
           python scripts/test-downloads-mount.py
           python scripts/test-alist-login.py
           python scripts/test-nas-browser.py
+          python scripts/test-nas-stream.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:

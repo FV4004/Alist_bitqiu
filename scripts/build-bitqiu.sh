@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-version=v3.65.0-bitqiu.15
+version=v3.65.0-bitqiu.16
 frontend=3.65.0
 commit=$(git rev-parse --short=12 HEAD)
 built_at=$(date -u '+%Y-%m-%d %H:%M:%S +0000')

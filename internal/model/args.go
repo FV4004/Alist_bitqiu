@@ -11,6 +11,9 @@ import (
 )
 
 type ListArgs struct {
+	// OnPage reports provisional batches for an incremental NAS view. Consumers
+	// must still wait for List to succeed before treating a directory as complete.
+	OnPage            func([]Obj) error `json:"-"`
 	ReqPath           string
 	S3ShowPlaceholder bool
 	Refresh           bool

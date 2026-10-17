@@ -576,6 +576,9 @@ func clientPageError(page int, cursor string, err error) error {
 }
 
 func (d *BitQiu) listWindows(ctx context.Context, dir model.Obj) ([]model.Obj, error) {
+	return d.listWindowsPages(ctx, dir, nil)
+}
+func (d *BitQiu) listWindowsPages(ctx context.Context, dir model.Obj, onPage func([]model.Obj) error) ([]model.Obj, error) {
 	d.clientMu.Lock()
 	defer d.clientMu.Unlock()
 	parentID := d.resolveParentID(dir)
@@ -601,12 +604,19 @@ func (d *BitQiu) listWindows(ctx context.Context, dir model.Obj) ([]model.Obj, e
 			return nil, clientPageError(page, cursor, err)
 		}
 		added := 0
+		fresh := []model.Obj{}
 		for _, o := range objs {
 			key := strconv.FormatBool(o.IsDir()) + ":" + o.GetID()
 			if !seen[key] {
 				seen[key] = true
 				all = append(all, o)
+				fresh = append(fresh, o)
 				added++
+			}
+		}
+		if onPage != nil && len(fresh) > 0 {
+			if err := onPage(fresh); err != nil {
+				return nil, err
 			}
 		}
 		if !more || len(objs) == 0 {
