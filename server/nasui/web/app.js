@@ -42,7 +42,7 @@
   function requestHeaders(){
     let token,clientID;
     try{token=localStorage.getItem('token')||'';clientID=localStorage.getItem('alist_client_id')||'';}catch{if(!handoffAuth)throw Error('当前浏览器无法读取 AList 登录状态。请允许网站存储，或在 Safari 中打开相同地址并登录。');}
-    if(!token&&handoffAuth){token=handoffAuth.token;clientID=handoffAuth.client_id;}
+    if(handoffAuth){token=handoffAuth.token;clientID=handoffAuth.client_id;}
     if(!token)throw Error('此页面未读取到 AList 登录状态。请在当前浏览器登录 AList 管理员账户；极空间 App 内仍失败时，可用 Safari 打开相同地址登录。');
     if(!clientID)throw Error('未读取到 AList 设备标识，请返回 AList 首页后重新登录，再打开 NAS 下载。');
     return {Authorization:token,'Client-Id':clientID,'Content-Type':'application/json'};

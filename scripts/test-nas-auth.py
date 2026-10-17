@@ -53,21 +53,21 @@ with sync_playwright() as p:
    assert not errors,errors
    for code,message,wanted in [(403,'too many active devices','设备数量已达上限'),(401,'session inactive','设备会话已失效'),(401,'invalid token','登录已失效'),(403,'You are not an admin','具有管理员角色'),(403,'policy denied','policy denied')]:
     cfg.update(code=code,message=message)
-    page.locator('#reload').click()
+    page.locator('#tasks-refresh').click()
     expect(page.locator('#error-message')).to_contain_text(wanted)
     page.locator('#error-close').click()
    cfg.update(code=200,message='')
    page.evaluate('sessionStorage.clear()');page.reload()
    expect(page.locator('#error-message')).to_contain_text('未读取到 AList 登录状态');page.locator('#error-close').click()
-   before=len(calls);page.locator('#reload').click()
+   before=len(calls);page.locator('#tasks-refresh').click()
    expect(page.locator('#error-message')).to_contain_text('未读取到 AList 登录状态')
    assert len(calls)==before
    page.locator('#error-close').click()
    page.evaluate("localStorage.setItem('token','fixture-token');localStorage.removeItem('alist_client_id')")
-   page.locator('#reload').click();expect(page.locator('#error-message')).to_contain_text('未读取到 AList 设备标识')
+   page.locator('#tasks-refresh').click();expect(page.locator('#error-message')).to_contain_text('未读取到 AList 设备标识')
    page.locator('#error-close').click()
    page.evaluate("Object.defineProperty(window,'localStorage',{get(){throw new DOMException('blocked','SecurityError')}})")
-   page.locator('#reload').click();expect(page.locator('#error-message')).to_contain_text('无法读取 AList 登录状态')
+   page.locator('#tasks-refresh').click();expect(page.locator('#error-message')).to_contain_text('无法读取 AList 登录状态')
    assert not errors,errors
    cfg['blocked']=True
    page.goto('https://nas.example'+prefix+'/@nas#nas-ticket=fixture-ticket')
