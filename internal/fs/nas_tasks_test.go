@@ -123,7 +123,7 @@ func TestNASDownloadLifecycle(t *testing.T) {
 	defer server.Close()
 	op.RegisterDriver(func() driver.Driver { return &nasHTTPFixture{endpoint: server.URL} })
 	source, dest := t.TempDir(), t.TempDir()
-	for _, name := range []string{"resume", "no-range", "cancel", "queue1", "queue2", "failure", "limit-0", "limit-1", "limit-2", "limit-3", "limit-4", "limit-5", "limit-6", "limit-7"} {
+	for _, name := range []string{"replace", "changed", "resume", "no-range", "cancel", "queue1", "queue2", "failure", "limit-0", "limit-1", "limit-2", "limit-3", "limit-4", "limit-5", "limit-6", "limit-7"} {
 		if err = os.WriteFile(filepath.Join(source, name), payload, 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -401,6 +401,113 @@ func TestNASDownloadLifecycle(t *testing.T) {
 		v := view(r.ID)
 		if !v.CanStart || !strings.Contains(v.Error, "503") {
 			t.Fatalf("failure not actionable: %+v", v)
+		}
+	})
+
+	t.Run("confirmed replacement preserves old data until atomic commit", func(t *testing.T) {
+		r := makeTask("replace")
+		old := []byte("original NAS content")
+		if err := os.WriteFile(filepath.Join(dest, r.Relative), old, 0600); err != nil {
+			t.Fatal(err)
+		}
+		root, err := os.OpenRoot(dest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer root.Close()
+		r.TargetVersion, _, err = NASPathVersion(root, r.Relative)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Replace = true
+		if err := QueueNASDownloads([]NASRecord{r}, user); err != nil {
+			t.Fatal(err)
+		}
+		nasEventually(t, func() bool { return view(r.ID).TransferredBytes >= 32768 })
+		data, _ := os.ReadFile(filepath.Join(dest, r.Relative))
+		if !bytes.Equal(data, old) {
+			t.Fatal("old file replaced before full transfer")
+		}
+		nasEventually(t, func() bool { return view(r.ID).State == "completed" })
+		data, _ = os.ReadFile(filepath.Join(dest, r.Relative))
+		if !bytes.Equal(data, payload) {
+			t.Fatal("replacement incomplete")
+		}
+		changed := makeTask("changed")
+		if err := os.WriteFile(filepath.Join(dest, changed.Relative), old, 0600); err != nil {
+			t.Fatal(err)
+		}
+		changed.TargetVersion, _, _ = NASPathVersion(root, changed.Relative)
+		changed.Replace = true
+		if err := os.WriteFile(filepath.Join(dest, changed.Relative), []byte("newer NAS data"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := QueueNASDownloads([]NASRecord{changed}, user); err != nil {
+			t.Fatal(err)
+		}
+		nasEventually(t, func() bool { return view(changed.ID).State == "failed" })
+		data, _ = os.ReadFile(filepath.Join(dest, changed.Relative))
+		if string(data) != "newer NAS data" {
+			t.Fatal("changed destination overwritten")
+		}
+		failure := makeTask("failure")
+		failure.ID = "replace-failure"
+		failure.Relative = "replace-failure"
+		failure.Destination += "-replacement"
+		if err := os.WriteFile(filepath.Join(dest, failure.Relative), old, 0600); err != nil {
+			t.Fatal(err)
+		}
+		failure.TargetVersion, _, _ = NASPathVersion(root, failure.Relative)
+		failure.Replace = true
+		if err := QueueNASDownloads([]NASRecord{failure}, user); err != nil {
+			t.Fatal(err)
+		}
+		nasEventually(t, func() bool { return view(failure.ID).State == "failed" })
+		data, _ = os.ReadFile(filepath.Join(dest, failure.Relative))
+		if !bytes.Equal(data, old) {
+			t.Fatal("failed download damaged original")
+		}
+	})
+	t.Run("history cleanup retention whole groups and durable rollback", func(t *testing.T) {
+		past := time.Now().Add(-91 * 24 * time.Hour)
+		recent := time.Now().Add(-time.Hour)
+		fixtures := []NASRecord{{ID: "hist-a", GroupID: "hist-group", State: "completed", EndTime: &past}, {ID: "hist-b", GroupID: "hist-group", State: "failed", EndTime: &recent}, {ID: "hist-old", State: "failed", EndTime: &past}, {ID: "hist-wait", State: "waiting"}, {ID: "hist-paused", State: "paused"}, {ID: "hist-mixed-done", GroupID: "mixed", State: "completed", EndTime: &past}, {ID: "hist-mixed-pause", GroupID: "mixed", State: "paused"}}
+		nasRegistry.Lock()
+		for _, r := range fixtures {
+			nasRegistry.tasks[r.ID] = &nasTask{record: r}
+		}
+		nasRegistry.Unlock()
+		if err := SaveNASDownloads(); err != nil {
+			t.Fatal(err)
+		}
+		result, err := ClearNASHistory(nil, true, false, time.Now().Add(-90*24*time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := nasFind("hist-old"); ok || result.Deleted < 1 {
+			t.Fatal("expired record retained")
+		}
+		for _, id := range []string{"hist-a", "hist-b", "hist-wait", "hist-paused", "hist-mixed-done"} {
+			if _, ok := nasFind(id); !ok {
+				t.Fatal("pruned active/recent group", id)
+			}
+		}
+		result, err = ClearNASHistory([]string{"hist-a"}, false, false, time.Time{})
+		if err != nil || result.Deleted != 2 {
+			t.Fatalf("group not cleared: %+v %v", result, err)
+		}
+		result, err = ClearNASHistory([]string{"mixed"}, false, false, time.Time{})
+		if err != nil || result.Deleted != 0 {
+			t.Fatal("cleared incomplete group")
+		}
+		// Keep generated fixture tasks out of the following persistence test.
+		nasRegistry.Lock()
+		for _, r := range fixtures {
+			delete(nasRegistry.tasks, r.ID)
+		}
+		nasRegistry.Unlock()
+		if err := SaveNASDownloads(); err != nil {
+			t.Fatal(err)
 		}
 	})
 	t.Run("journal restores history and pauses interrupted tasks", func(t *testing.T) {

@@ -119,7 +119,9 @@ async def check_nas_navigation(browser, prefix):
                 response['data'] = {'cloud': [{'path': '/cloud', 'label': '/cloud'}], 'targets': [{'path': '/NAS下载', 'label': '/NAS下载'}], 'downloads_ready': True, 'downloads_enabled': True}
             elif path == '/api/admin/bitqiu/nas/tasks':
                 response['data'] = {'active': [], 'history': []}
-            elif path == '/api/admin/bitqiu/nas/download':
+            elif path == '/api/admin/bitqiu/nas/prepare':
+                response = {'code': 200, 'data': {'plan_id':'fixture-plan','conflicts':[]}}
+            elif path == '/api/admin/bitqiu/nas/commit':
                 response['data'] = {'tasks': [{'id': 'fixture-download'}]}
             await request.fulfill(content_type='application/json', body=json.dumps(response))
             return

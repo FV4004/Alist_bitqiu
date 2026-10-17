@@ -22,6 +22,11 @@ import (
 const nasJournalKey = "bitqiu_nas_v1"
 
 type NASRecord struct {
+	GroupID          string     `json:"group_id,omitempty"`
+	GroupName        string     `json:"group_name,omitempty"`
+	BatchID          string     `json:"batch_id,omitempty"`
+	Replace          bool       `json:"replace,omitempty"`
+	TargetVersion    string     `json:"target_version,omitempty"`
 	ID               string     `json:"id"`
 	Name             string     `json:"name"`
 	Source           string     `json:"source"`
@@ -132,11 +137,14 @@ func NASDownloads() []NASView {
 	return result
 }
 func SaveNASDownloads() error {
+	nasSaveMu.Lock()
+	defer nasSaveMu.Unlock()
+	return saveNASDownloadsLocked()
+}
+func saveNASDownloadsLocked() error {
 	if err := NASDownloadsAvailable(); err != nil {
 		return err
 	}
-	nasSaveMu.Lock()
-	defer nasSaveMu.Unlock()
 	views := NASDownloads()
 	records := make([]NASRecord, 0, len(views))
 	for _, v := range views {
@@ -202,6 +210,7 @@ func InitNASDownloads() (result error) {
 		return err
 	}
 
+	startNASHistoryRetention()
 	return nil
 }
 
@@ -290,6 +299,9 @@ func ControlNASDownload(ctx context.Context, id, action string, restart bool, us
 	}
 	n.action.Lock()
 	defer n.action.Unlock()
+	if current, found := nasFind(id); !found || current != n {
+		return false, errors.New("任务记录已清理")
+	}
 	n.mu.Lock()
 	state := n.record.State
 	active := n.active

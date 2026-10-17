@@ -32,11 +32,14 @@ with sync_playwright() as p:
      data={'content':files if size==-1 else files[(n-1)*size:n*size],'total':237,'filtered_total':237,'has_more':False if size==-1 else n*size<237}
     elif endpoint=='/admin/bitqiu/nas/stats':requests.append(body);data={'selected_count':len(body['names']),'file_count':3,'known_bytes':1048576,'unknown_count':1}
     elif endpoint=='/admin/bitqiu/nas/dirs':data=[{'path':'电影','label':'电影'}] if body['path']=='/NAS下载' else []
-    elif endpoint=='/admin/bitqiu/nas/download':
+    elif endpoint=='/admin/bitqiu/nas/prepare':
      requests.append(body)
      if cfg['duplicate']:
       r.fulfill(status=200,content_type='application/json',body=json.dumps({'code':409,'message':'重复任务：<文件> 已在下载队列中，请勿重复提交。'}));return
-     data={'tasks':[{'id':'fixture-task'}]}
+     data={'plan_id':'fixture-plan','conflicts':cfg.get('conflicts',[])}
+    elif endpoint=='/admin/bitqiu/nas/commit':requests.append(body);data={'tasks':[{'id':'fixture-task'}]}
+    elif endpoint=='/admin/bitqiu/nas/history/clear':
+     requests.append(body);assert body['confirmed'];selected=set(body['ids']);removed=[t for t in tasks if t['state'] in ['completed','failed','canceled'] and (body['scope']=='all' or t['id'] in selected or t.get('group_id') in selected)];tasks[:]=[t for t in tasks if t not in removed];data={'deleted':len(removed),'skipped':0,'partial_failures':0}
     elif endpoint=='/admin/bitqiu/nas/tasks':data={'active':[caps(t) for t in tasks if t['state'] not in ['completed','canceled','failed']],'history':[caps(t) for t in tasks if t['state'] in ['completed','canceled','failed']],'concurrency':{'limit':cfg['limit'],'maximum':5,'running':sum(t['state']=='downloading' for t in tasks)}}
     elif endpoint=='/admin/bitqiu/nas/concurrency':
      if cfg['fail_next']:
@@ -101,7 +104,26 @@ with sync_playwright() as p:
   cfg['duplicate']=False
   page.locator('#download').click();expect(page.locator('#notice')).to_contain_text('已提交 1 个后台任务')
   payload=next(x for x in requests if 'dst_dir' in x)
-  assert payload=={'src_dir':'/网盘','dst_dir':'/NAS下载/电影','names':['file-236.txt','file-136.txt','file-000.txt'],'overwrite':False,'skip_existing':False},payload
+  assert payload=={'src_dir':'/网盘','dst_dir':'/NAS下载/电影','names':['file-236.txt','file-136.txt','file-000.txt']},payload
+  # Explicit conflict decisions: remember only within one submission, cancel preserves selection.
+  page.get_by_role('checkbox',name='选择 file-001.txt',exact=True).check()
+  cfg['conflicts']=[{'id':'collision'+str(i),'path':'/NAS下载/电影/existing'+str(i)+'.mp4','existing_size':100,'incoming_size':200,'can_replace':True} for i in range(2)]
+  page.locator('#download').click();expect(page.locator('#conflict-dialog')).to_be_visible()
+  page.locator('#conflict-remember').check();page.locator('#conflict-replace').click()
+  expect(page.locator('#notice')).to_contain_text('已提交 1 个后台任务')
+  expect(page.locator('#selection-count')).to_have_text('已选择：0 项')
+  assert requests[-1]=={'plan_id':'fixture-plan','choices':{'collision0':'replace','collision1':'replace'}},requests[-1]
+  page.get_by_role('checkbox',name='选择 file-001.txt',exact=True).check()
+  page.locator('#download').click();expect(page.locator('#conflict-dialog')).to_be_visible()
+  expect(page.locator('#conflict-remember')).not_to_be_checked()
+  page.keyboard.press('Escape');expect(page.locator('#selection-count')).to_have_text('已选择：1 项')
+  cfg['conflicts'][0]['can_replace']=False
+  page.locator('#download').click();expect(page.locator('#conflict-replace')).to_be_disabled()
+  page.locator('#conflict-remember').check();page.locator('#conflict-skip').click()
+  expect(page.locator('#notice')).to_contain_text('已提交 1 个后台任务')
+  expect(page.locator('#selection-count')).to_have_text('已选择：0 项')
+  assert requests[-1]['choices']=={'collision0':'skip','collision1':'skip'}
+  cfg['conflicts']=[]
   def card(id):return page.locator('[data-task-id="'+id+'"]')
   expect(card('active1').locator('.task-speed')).to_have_text('2.0 MB/s')
   expect(card('active1').get_by_role('button',name='开始',exact=True)).to_be_disabled()
@@ -188,6 +210,26 @@ with sync_playwright() as p:
     page.get_by_role('checkbox',name='选择 file-236.txt',exact=True).uncheck()
    if width==390:page.screenshot(path=str(output/'nas-download-mobile-preview.png'),full_page=True)
 
+  page.set_viewport_size({'width':390,'height':844})
+  tasks[:]=[{'id':'child-a','name':'海边.mp4','state':'downloading','group_id':'group-travel','group_name':'旅行记录','total_bytes':100,'transferred_bytes':25,'progress':25,'speed_bytes_per_second':10}, {'id':'child-b','name':'合照.jpg','state':'completed','group_id':'group-travel','group_name':'旅行记录','total_bytes':300,'transferred_bytes':300,'progress':100,'end_time':'2030-01-01T00:00:00Z'}]
+  page.locator('#tasks-refresh').click();page.locator('#active-tab').click()
+  expect(card('group-travel')).to_be_visible();expect(card('child-a')).to_have_count(0)
+  expect(card('group-travel').locator('progress')).to_have_js_property('value',81.25)
+  card('group-travel').get_by_role('button',name='旅行记录',exact=False).click()
+  expect(card('child-a')).to_be_visible();expect(card('child-b')).to_be_visible()
+  expect(card('child-a').locator('.type-video')).to_have_count(1)
+  expect(card('child-b').locator('.type-image')).to_have_count(1)
+  page.locator('#tasks-refresh').click();expect(card('child-a')).to_be_visible()
+  tasks[0].update(state='failed',error='fixture failed',end_time='2030-01-01T00:00:00Z')
+  page.locator('#tasks-refresh').click();page.locator('#history-tab').click()
+  expect(page.locator('#history-count')).to_have_text('1')
+  card('group-travel').get_by_role('button',name='清理记录',exact=True).click()
+  expect(page.locator('#history-remove-partials')).not_to_be_checked()
+  page.locator('#history-dismiss').click();expect(page.locator('#history-count')).to_have_text('1')
+  page.locator('#history-clear-all').click();page.locator('#history-remove-partials').check();page.locator('#history-confirm').click()
+  expect(page.locator('#history-count')).to_have_text('0')
+  assert requests[-1]['remove_partials'] is True and requests[-1]['scope']=='all'
+  for element in page.locator('#source-files .type-icon').all():assert element.get_attribute('viewBox')=='0 0 24 24'
   assert not errors,errors
   print('PASS TEST-01/02/03/04/05/06/07/09/10/11/12 UI; backend termination/resume verified separately in Go; prefix='+repr(prefix));context.close()
  browser.close()
