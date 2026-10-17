@@ -38,3 +38,22 @@ test('failed identity checks wait for the polling interval instead of recursivel
  await new Promise(resolve=>setImmediate(resolve));
  assert.equal(calls,2);
 });
+
+test('navigation reuses the official device identity, including after it changes',async()=>{
+ const b=browser('/alist');const headers=[];let id='device-one';
+ b.context.localStorage={getItem(key){return key==='token'?'fixture-token':id;}};
+ b.context.document.getElementById=()=>null;
+ b.context.fetch=(url,options)=>{headers.push(options.headers);return Promise.resolve({json:()=>Promise.resolve({code:403})});};
+ b.events.DOMContentLoaded();await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(headers[0]['Client-Id'],'device-one');assert.equal(headers[0].Authorization,'fixture-token');
+ id='device-two';b.timers[0]();await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(headers.length,2);assert.equal(headers[1]['Client-Id'],'device-two');
+});
+test('navigation waits for the official frontend to create a device ID',async()=>{
+ const b=browser();let id='',calls=0;
+ b.context.localStorage={getItem(key){return key==='token'?'fixture-token':id;}};
+ b.context.document.getElementById=()=>null;
+ b.context.fetch=()=>{calls++;return Promise.resolve({json:()=>Promise.resolve({code:403})});};
+ b.events.DOMContentLoaded();await new Promise(resolve=>setImmediate(resolve));assert.equal(calls,0);
+ id='official-device';b.timers[0]();await new Promise(resolve=>setImmediate(resolve));assert.equal(calls,1);
+});

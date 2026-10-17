@@ -125,3 +125,11 @@ python scripts/test-nas-browser.py
 新增文件：`server/handles/bitqiu_nas_stream.go`、`scripts/test-nas-stream.py`。修改 BitQiu 两种模式分页回调、可选 ListArgs.OnPage 与 op.List 请求隔离、NAS 页面和原有验收脚本。无数据库或 Docker 挂载迁移。分类仅修改右侧保存目录；左侧负责流式目录和排序。
 
 最终检查通过：https://github.com/FV4004/Alist_bitqiu/actions/runs/39010377357 。BitQiu 协议及 NAS 后端 race、完整官方登录页、NAS 界面与两种路径前缀的实际 HTTP 流式测试全部通过。实际 HTTP 用例在第二批仍被阻塞时验证第一批可见，并覆盖后续错误与缺失 done 的断流；测试服务的 GET 入口配置已修正。
+
+## v17：内置浏览器登录交接
+
+针对“同一 iPhone 的 Safari 可用，极空间 App NAS 入口提示管理员权限”的反馈，修正普通/流式/入口身份检查缺少 `Client-Id` 的问题，并增加管理员单次登录交接：256 位随机票据、有效期 60 秒、兑换后失效，内存上限 1024，发放必须通过原 Auth + AuthAdmin，兑换后访问 NAS API 仍执行原认证。票据位于 URL fragment，页面初始化立即移除；原 JWT 不进入 URL。无需数据库或配置迁移。
+
+新增 `server/nasui/handoff_test.go` 验证非管理员禁止发放、单次兑换、并发仅一次成功、过期与内存限额；新增 `scripts/test-nas-auth.py` 在 Chromium 和 WebKit、390px 移动布局、根路径及 `/alist` 前缀下验证登录存储丢失、刷新恢复、两类存储均被禁用时的内存交接、设备标识传递及错误分类。原登录、流式列表、下载管理和传输测试保留。最终通过情况见本次修复提交的 GitHub Actions；未进行极空间 iOS App 实机测试。
+
+本次修复检查已在 [GitHub Actions 39034205342](https://github.com/FV4004/Alist_bitqiu/actions/runs/39034205342) 通过：全部 NAS 后端 race、BitQiu 协议、7 项导航 Node 回归、官方前端登录/下载往返、TEST-01～12 相关 UI 与真实传输回归、实际 HTTP 流式首批显示，以及 Chromium/WebKit 各 2 个路径认证场景均成功。极空间 App/iOS 27.0.1 实机尚待更新后验证。
