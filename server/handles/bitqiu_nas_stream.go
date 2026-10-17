@@ -108,6 +108,7 @@ func BitQiuNASListStream(c *gin.Context) {
 	c.Header("Content-Type", "application/x-ndjson; charset=utf-8")
 	c.Header("Cache-Control", "no-store")
 	c.Header("X-Accel-Buffering", "no")
+	c.Header("X-Content-Type-Options", "nosniff")
 	write := func(frame any) error {
 		if err := c.Request.Context().Err(); err != nil {
 			return err

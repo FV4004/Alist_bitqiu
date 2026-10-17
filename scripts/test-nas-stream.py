@@ -26,7 +26,7 @@ for prefix in ['', '/alist']:
    if path.endswith('/entries'):return self.json([])
    if not path.endswith('/list-stream'):self.send_error(404);return
    cfg['requests']+=1;mode=cfg['mode']
-   self.send_response(200);self.send_header('Content-Type','application/x-ndjson');self.send_header('Cache-Control','no-store');self.end_headers()
+   self.send_response(200);self.send_header('Content-Type','application/x-ndjson');self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff');self.end_headers()
    def send(value):self.wfile.write((json.dumps(value,ensure_ascii=False)+'\n').encode());self.wfile.flush()
    try:
     send({'event':'start'});send({'event':'batch','content':[{'name':'文件夹','is_dir':True,'size':0},{'name':'第一份文件.mp4','is_dir':False,'size':100,'size_known':True}]});first.set()
@@ -40,7 +40,9 @@ for prefix in ['', '/alist']:
   browser=p.chromium.launch(executable_path=os.environ.get('CHROMIUM_PATH') or ('/usr/bin/chromium' if Path('/usr/bin/chromium').exists() else None),headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
   page=browser.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
   page.goto(f'http://127.0.0.1:{server.server_port}'+prefix+'/@nas')
-  expect(page.locator('#source-files input')).to_have_count(2)
+  try:expect(page.locator('#source-files input')).to_have_count(2)
+  except Exception:
+   print('STREAM DIAGNOSTIC',cfg,first.is_set(),page.locator('body').inner_text()[:2500],errors);raise
   assert first.is_set() and not gate.is_set()
   expect(page.locator('#source-loading')).to_contain_text('正在加载')
   expect(page.locator('#select-page')).to_be_disabled();expect(page.locator('#download')).to_be_disabled()
