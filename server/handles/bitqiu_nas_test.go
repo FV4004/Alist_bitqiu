@@ -280,7 +280,7 @@ func TestBitQiuNASIntegration(t *testing.T) {
 			} else if !strings.Contains(body, `"total":238`) {
 				t.Fatal("missing final count", body)
 			}
-			if w.Header().Get("X-Accel-Buffering") != "no" || !strings.Contains(w.Header().Get("Content-Type"), "application/x-ndjson") {
+			if w.Header().Get("X-Accel-Buffering") != "no" || w.Header().Get("X-Content-Type-Options") != "nosniff" || !strings.Contains(w.Header().Get("Content-Type"), "application/x-ndjson") {
 				t.Fatal("stream buffered or mislabelled")
 			}
 		}

@@ -15,6 +15,7 @@ for prefix in ['', '/alist']:
    raw=json.dumps({'code':200,'data':data}).encode();self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
   def do_GET(self):
    path=self.path.removeprefix(prefix).split('?',1)[0]
+   if path=='/api/admin/bitqiu/nas/targets':return self.json({'cloud':[{'path':'/cloud','label':'cloud'}],'targets':[{'path':'/NAS','label':'NAS'}],'downloads_enabled':True})
    if path=='/api/admin/bitqiu/nas/tasks':return self.json({'active':[],'history':[]})
    name='index.html' if path=='/@nas' else path.rsplit('/',1)[-1]
    file=ROOT/name
