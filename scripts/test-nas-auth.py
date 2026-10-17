@@ -38,6 +38,8 @@ with sync_playwright() as p:
     body=file.read_bytes()
     if name=='index.html' and cfg['isolate']:
      body=body.replace(b'</head>',b"<script>localStorage.clear();</script></head>")
+    if name=='index.html' and cfg.get('blocked'):
+     body=body.replace(b'</head>',b"<script>for(const key of ['localStorage','sessionStorage'])Object.defineProperty(window,key,{get(){throw new DOMException('blocked','SecurityError')}})</script></head>")
     r.fulfill(content_type={'.js':'application/javascript','.html':'text/html','.css':'text/css'}[file.suffix],body=body)
    context.route('https://nas.example/**',route)
    page.goto('https://nas.example'+prefix+'/cloud')
@@ -66,6 +68,11 @@ with sync_playwright() as p:
    page.locator('#error-close').click()
    page.evaluate("Object.defineProperty(window,'localStorage',{get(){throw new DOMException('blocked','SecurityError')}})")
    page.locator('#reload').click();expect(page.locator('#error-message')).to_contain_text('无法读取 AList 登录状态')
+   assert not errors,errors
+   cfg['blocked']=True
+   page.goto('https://nas.example'+prefix+'/@nas#nas-ticket=fixture-ticket')
+   expect(page.locator('#source-loading')).to_contain_text('加载完成')
+   assert page.evaluate('location.hash')==''
    assert not errors,errors
    context.close()
    print('PASS NAS auth: '+engine.name+' prefix='+repr(prefix))
