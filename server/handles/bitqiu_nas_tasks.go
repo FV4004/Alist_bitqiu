@@ -5,8 +5,6 @@ import (
 	"errors"
 	"math"
 	"path"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/alist-org/alist/v3/internal/driver"
@@ -151,39 +149,11 @@ func BitQiuNASStats(c *gin.Context) {
 }
 func queueNASSelection(c *gin.Context, req MoveCopyReq, destination string) error {
 	user := c.MustGet("user").(*model.User)
-	source, actual, virtual, err := nasSelectionSource(user, req.SrcDir)
+	records, err := buildNASRecords(c, req, destination)
 	if err != nil {
 		return err
 	}
-	entries, _, err := walkNASSelection(c.Request.Context(), source, actual, req.Names)
-	if err != nil {
-		return err
-	}
-	target, actualTarget, err := op.GetStorageAndActualPath(destination)
-	if err != nil {
-		return err
-	}
-	localDriver, _, err := localNASDirectory(destination)
-	if err != nil {
-		return err
-	}
-	rootProvider, ok := localDriver.GetAddition().(driver.IRootPath)
-	if !ok {
-		return errors.New("NAS 本地存储缺少根目录")
-	}
-	root := rootProvider.GetRootPath()
-	records := make([]fs.NASRecord, 0, len(entries))
-	for _, entry := range entries {
-		relative := strings.TrimPrefix(path.Join(actualTarget, entry.relative), "/")
-		if !filepath.IsLocal(filepath.FromSlash(relative)) {
-			return errors.New("无效目标文件路径")
-		}
-		record, err := fs.NewNASRecord(user, path.Join(virtual, entry.relative), path.Join(destination, entry.relative), root, relative, source.GetStorage().MountPath, target.GetStorage().MountPath, entry.source, entry.obj)
-		if err != nil {
-			return err
-		}
-		records = append(records, record)
-	}
+
 	if err = fs.QueueNASDownloads(records, user); err != nil {
 		return err
 	}
@@ -207,13 +177,15 @@ func BitQiuNASTasks(c *gin.Context) {
 		v.SrcPath = ""
 		v.Validator = ""
 		v.ValidatorKind = ""
+		v.TargetVersion = ""
+		v.Replace = false
 		if v.State == "completed" || v.State == "canceled" || v.State == "failed" {
 			history = append(history, v)
 		} else {
 			active = append(active, v)
 		}
 	}
-	common.SuccessResp(c, gin.H{"active": active, "history": history, "concurrency": fs.NASConcurrencyStatus()})
+	common.SuccessResp(c, gin.H{"active": active, "history": history, "concurrency": fs.NASConcurrencyStatus(), "history_days": fs.NASHistoryDays})
 }
 func BitQiuNASControl(c *gin.Context) {
 	var req struct {
@@ -251,9 +223,13 @@ func BitQiuNASControl(c *gin.Context) {
 	}
 	user := c.MustGet("user").(*model.User)
 	paused := map[string]bool{}
-	if req.Scope == "all" && req.Action == "pause" {
+	if req.Action == "pause" {
 		var err error
-		paused, err = fs.PauseNASWaiting()
+		if req.Scope == "all" {
+			paused, err = fs.PauseNASWaiting()
+		} else {
+			paused, err = fs.PauseNASWaitingGroups(req.IDs)
+		}
 		if err != nil {
 			common.ErrorResp(c, err, 503)
 			return

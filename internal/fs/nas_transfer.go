@@ -73,11 +73,10 @@ func transferNAS(ctx context.Context, n *nasTask) error {
 	if err = root.MkdirAll(path.Dir(r.Relative), 0755); err != nil {
 		return err
 	}
-	if _, err = root.Lstat(r.Relative); err == nil {
-		return errors.New("目标已有同名文件，未覆盖")
-	} else if !os.IsNotExist(err) {
+	if err = NASValidateTarget(r); err != nil {
 		return err
 	}
+
 	source, err := op.GetStorageByMountPath(r.SrcMount)
 	if err != nil {
 		return err
@@ -293,6 +292,21 @@ func publishNASFile(ctx context.Context, root *os.Root, partial, final string, n
 	if err := ctx.Err(); err != nil {
 		n.mu.Unlock()
 		return err
+	}
+	if n.record.Replace {
+		version, info, err := NASPathVersion(root, final)
+		if err != nil || !info.Mode().IsRegular() || version != n.record.TargetVersion {
+			n.mu.Unlock()
+			return errors.New("目标文件在确认后发生变化，旧文件未替换；请重新提交并确认")
+		}
+		// Same-directory rename replaces atomically; never remove the old file first.
+		if err = root.Rename(partial, final); err != nil {
+			n.mu.Unlock()
+			return fmt.Errorf("替换失败，旧文件及临时下载已保留：%w", err)
+		}
+		n.record.State = "completed"
+		n.mu.Unlock()
+		return nil
 	}
 	linkErr := root.Link(partial, final)
 	if linkErr == nil {

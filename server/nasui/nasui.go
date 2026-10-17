@@ -28,7 +28,7 @@ func Register(g *gin.RouterGroup) {
 		kind := "application/javascript; charset=utf-8"
 		if name == "style.css" {
 			kind = "text/css; charset=utf-8"
-		} else if name != "app.js" && name != "nav.js" {
+		} else if name != "app.js" && name != "nav.js" && name != "icons.js" {
 			c.Status(404)
 			return
 		}

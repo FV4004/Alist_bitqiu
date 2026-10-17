@@ -10,7 +10,7 @@ import (
 func TestNASAssetsAndBasePath(t *testing.T) {
 	r := gin.New()
 	Register(r.Group("/alist"))
-	for _, name := range []string{"/@nas", "/bitqiu-assets/app.js", "/bitqiu-assets/nav.js", "/bitqiu-assets/style.css"} {
+	for _, name := range []string{"/@nas", "/bitqiu-assets/app.js", "/bitqiu-assets/icons.js", "/bitqiu-assets/nav.js", "/bitqiu-assets/style.css"} {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest("GET", "/alist"+name, nil))
 		if w.Code != 200 || w.Body.Len() == 0 || w.Header().Get("Cache-Control") != "no-store" {

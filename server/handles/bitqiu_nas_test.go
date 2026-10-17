@@ -333,6 +333,94 @@ func TestBitQiuNASIntegration(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("preflight decisions grouping expiry and safe history API", func(t *testing.T) {
+		prepare := func(names []string) struct {
+			PlanID    string        `json:"plan_id"`
+			Conflicts []nasConflict `json:"conflicts"`
+		} {
+			result := invoke(BitQiuNASPrepare, MoveCopyReq{SrcDir: "/cloud", DstDir: "/nas/Movies", Names: names}, true)
+			requireOK(t, result)
+			var plan struct {
+				PlanID    string        `json:"plan_id"`
+				Conflicts []nasConflict `json:"conflicts"`
+			}
+			if err := json.Unmarshal(result["data"], &plan); err != nil {
+				t.Fatal(err)
+			}
+			return plan
+		}
+		before := len(fs.NASDownloads())
+		plan := prepare([]string{"file-000.txt"})
+		if len(plan.Conflicts) != 1 || !plan.Conflicts[0].CanReplace || len(fs.NASDownloads()) != before {
+			t.Fatal("prepare changed queue or lost conflict")
+		}
+		if code(invoke(BitQiuNASCommit, map[string]any{"plan_id": plan.PlanID}, true)) == 200 {
+			t.Fatal("missing decision accepted")
+		}
+		requireOK(t, invoke(BitQiuNASCommit, map[string]any{"plan_id": plan.PlanID, "choices": map[string]string{plan.Conflicts[0].ID: "skip"}}, true))
+		if code(invoke(BitQiuNASCommit, map[string]any{"plan_id": plan.PlanID, "choices": map[string]string{plan.Conflicts[0].ID: "replace"}}, true)) == 200 {
+			t.Fatal("plan replay allowed")
+		}
+		body, _ := os.ReadFile(filepath.Join(dest, "Movies/file-000.txt"))
+		if string(body) != "NAS download fixture" {
+			t.Fatal("skip modified target")
+		}
+		folder := prepare([]string{"folder"})
+		if len(folder.Conflicts) != 1 {
+			t.Fatalf("folder merge lost conflict: %+v", folder)
+		}
+		requireOK(t, invoke(BitQiuNASCommit, map[string]any{"plan_id": folder.PlanID, "choices": map[string]string{folder.Conflicts[0].ID: "skip"}}, true))
+		group := ""
+		for _, v := range fs.NASDownloads() {
+			if v.ID == folder.Conflicts[0].ID {
+				group = v.GroupID
+			}
+		}
+		if group == "" {
+			t.Fatal("folder linkage missing")
+		}
+		ids := []string{}
+		for _, v := range fs.NASDownloads() {
+			if v.GroupID == group {
+				ids = append(ids, v.ID)
+			}
+		}
+		requireOK(t, invoke(BitQiuNASControl, map[string]any{"scope": "selected", "ids": ids, "action": "pause"}, true))
+		for _, v := range fs.NASDownloads() {
+			if v.GroupID == group && v.State != "completed" && v.State != "paused" {
+				t.Fatal("folder pause left waiting sibling", v.State)
+			}
+		}
+
+		// Empty subfolder is still queued, so cleaning a completed child must skip the whole group.
+		result := invoke(BitQiuNASClearHistory, map[string]any{"scope": "selected", "ids": []string{folder.Conflicts[0].ID}, "confirmed": true}, true)
+		requireOK(t, result)
+		var cleared fs.NASHistoryResult
+		_ = json.Unmarshal(result["data"], &cleared)
+		if cleared.Deleted != 0 {
+			t.Fatal("cleared group with queued child")
+		}
+		if code(invoke(BitQiuNASClearHistory, map[string]any{"scope": "all"}, true)) == 200 {
+			t.Fatal("cleanup lacked confirmation")
+		}
+		expired := prepare([]string{"file-000.txt"})
+		nasPlans.Lock()
+		nasPlans.items[expired.PlanID].expires = time.Now().Add(-time.Minute)
+		nasPlans.Unlock()
+		if code(invoke(BitQiuNASCommit, map[string]any{"plan_id": expired.PlanID}, true)) == 200 {
+			t.Fatal("expired plan accepted")
+		}
+		// A changed file is rejected even after explicit replacement confirmation.
+		changed := prepare([]string{"file-000.txt"})
+		if err := os.WriteFile(filepath.Join(dest, "Movies/file-000.txt"), []byte("changed"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if code(invoke(BitQiuNASCommit, map[string]any{"plan_id": changed.PlanID, "choices": map[string]string{changed.Conflicts[0].ID: "replace"}}, true)) == 200 {
+			t.Fatal("stale confirmation allowed")
+		}
+		requireOK(t, invoke(BitQiuNASControl, map[string]any{"scope": "all", "action": "cancel", "confirmed": true}, true))
+	})
 	t.Run("concurrency API bounds and persisted snapshot", func(t *testing.T) {
 		for _, limit := range []int{0, 6, -1} {
 			if code(invoke(BitQiuNASConcurrency, map[string]int{"limit": limit}, true)) == 200 {

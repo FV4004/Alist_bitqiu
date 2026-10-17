@@ -22,6 +22,11 @@ import (
 const nasJournalKey = "bitqiu_nas_v1"
 
 type NASRecord struct {
+	GroupID          string     `json:"group_id,omitempty"`
+	GroupName        string     `json:"group_name,omitempty"`
+	BatchID          string     `json:"batch_id,omitempty"`
+	Replace          bool       `json:"replace,omitempty"`
+	TargetVersion    string     `json:"target_version,omitempty"`
 	ID               string     `json:"id"`
 	Name             string     `json:"name"`
 	Source           string     `json:"source"`
@@ -132,11 +137,14 @@ func NASDownloads() []NASView {
 	return result
 }
 func SaveNASDownloads() error {
+	nasSaveMu.Lock()
+	defer nasSaveMu.Unlock()
+	return saveNASDownloadsLocked()
+}
+func saveNASDownloadsLocked() error {
 	if err := NASDownloadsAvailable(); err != nil {
 		return err
 	}
-	nasSaveMu.Lock()
-	defer nasSaveMu.Unlock()
 	views := NASDownloads()
 	records := make([]NASRecord, 0, len(views))
 	for _, v := range views {
@@ -202,6 +210,7 @@ func InitNASDownloads() (result error) {
 		return err
 	}
 
+	startNASHistoryRetention()
 	return nil
 }
 
@@ -232,17 +241,24 @@ func QueueNASDownloads(records []NASRecord, user *model.User) error {
 		return err
 	}
 	nasRegistry.Lock()
-	for _, r := range records {
-		for _, existing := range nasRegistry.tasks {
-			existing.mu.Lock()
-			occupied := existing.record.Root == r.Root && existing.record.Relative == r.Relative && !nasTerminal(existing.record.State)
-			existing.mu.Unlock()
-			if occupied {
-				nasRegistry.Unlock()
-				return fmt.Errorf("该目标已有任务，请开始原任务或选择其他目录：%s", r.Name)
-			}
+
+	occupied := map[string]bool{}
+	for _, n := range nasRegistry.tasks {
+		n.mu.Lock()
+		if !nasTerminal(n.record.State) {
+			occupied[n.record.Root+"\x00"+n.record.Relative] = true
 		}
+		n.mu.Unlock()
 	}
+	for _, r := range records {
+		key := r.Root + "\x00" + r.Relative
+		if occupied[key] {
+			nasRegistry.Unlock()
+			return fmt.Errorf("该目标已有任务，请开始原任务或选择其他目录：%s", r.Name)
+		}
+		occupied[key] = true
+	}
+
 	for _, r := range records {
 		nasRegistry.tasks[r.ID] = &nasTask{record: r, creator: user, queueOrder: nasQueueSequence.Add(1)}
 	}
@@ -290,6 +306,9 @@ func ControlNASDownload(ctx context.Context, id, action string, restart bool, us
 	}
 	n.action.Lock()
 	defer n.action.Unlock()
+	if current, found := nasFind(id); !found || current != n {
+		return false, errors.New("任务记录已清理")
+	}
 	n.mu.Lock()
 	state := n.record.State
 	active := n.active
@@ -405,6 +424,47 @@ func PauseNASWaiting() (map[string]bool, error) {
 		n.mu.Unlock()
 	}
 	nasRegistry.Unlock()
+	return paused, SaveNASDownloads()
+}
+
+// Freeze waiting siblings before pausing a selected whole folder. Partial
+// selections and standalone waiting tasks retain their previous skip behavior.
+func PauseNASWaitingGroups(ids []string) (map[string]bool, error) {
+	if err := NASDownloadsAvailable(); err != nil {
+		return nil, err
+	}
+	selected := map[string]bool{}
+	for _, id := range ids {
+		selected[id] = true
+	}
+	paused := map[string]bool{}
+	nasRegistry.Lock()
+	complete := map[string]bool{}
+	for _, n := range nasRegistry.tasks {
+		n.mu.Lock()
+		r := n.record
+		if r.GroupID != "" {
+			if _, ok := complete[r.GroupID]; !ok {
+				complete[r.GroupID] = true
+			}
+			if !selected[r.ID] {
+				complete[r.GroupID] = false
+			}
+		}
+		n.mu.Unlock()
+	}
+	for _, n := range nasRegistry.tasks {
+		n.mu.Lock()
+		if n.record.GroupID != "" && complete[n.record.GroupID] && n.record.State == "waiting" {
+			n.record.State = "paused"
+			paused[n.record.ID] = true
+		}
+		n.mu.Unlock()
+	}
+	nasRegistry.Unlock()
+	if len(paused) == 0 {
+		return paused, nil
+	}
 	return paused, SaveNASDownloads()
 }
 func (t *CopyTask) runNAS() (err error) {
