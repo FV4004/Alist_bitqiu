@@ -223,9 +223,13 @@ func BitQiuNASControl(c *gin.Context) {
 	}
 	user := c.MustGet("user").(*model.User)
 	paused := map[string]bool{}
-	if req.Scope == "all" && req.Action == "pause" {
+	if req.Action == "pause" {
 		var err error
-		paused, err = fs.PauseNASWaiting()
+		if req.Scope == "all" {
+			paused, err = fs.PauseNASWaiting()
+		} else {
+			paused, err = fs.PauseNASWaitingGroups(req.IDs)
+		}
 		if err != nil {
 			common.ErrorResp(c, err, 503)
 			return

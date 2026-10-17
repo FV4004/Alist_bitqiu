@@ -338,12 +338,18 @@ func TestBitQiuNASIntegration(t *testing.T) {
 		prepare := func(names []string) struct {
 			PlanID    string        `json:"plan_id"`
 			Conflicts []nasConflict `json:"conflicts"`
-		} { result := invoke(BitQiuNASPrepare, MoveCopyReq{SrcDir: "/cloud", DstDir: "/nas/Movies", Names: names}, true); requireOK(t, result); var plan struct {
-			PlanID    string        `json:"plan_id"`
-			Conflicts []nasConflict `json:"conflicts"`
-		}; if err := json.Unmarshal(result["data"], &plan); err != nil {
-			t.Fatal(err)
-		}; return plan }
+		} {
+			result := invoke(BitQiuNASPrepare, MoveCopyReq{SrcDir: "/cloud", DstDir: "/nas/Movies", Names: names}, true)
+			requireOK(t, result)
+			var plan struct {
+				PlanID    string        `json:"plan_id"`
+				Conflicts []nasConflict `json:"conflicts"`
+			}
+			if err := json.Unmarshal(result["data"], &plan); err != nil {
+				t.Fatal(err)
+			}
+			return plan
+		}
 		before := len(fs.NASDownloads())
 		plan := prepare([]string{"file-000.txt"})
 		if len(plan.Conflicts) != 1 || !plan.Conflicts[0].CanReplace || len(fs.NASDownloads()) != before {
@@ -374,6 +380,19 @@ func TestBitQiuNASIntegration(t *testing.T) {
 		if group == "" {
 			t.Fatal("folder linkage missing")
 		}
+		ids := []string{}
+		for _, v := range fs.NASDownloads() {
+			if v.GroupID == group {
+				ids = append(ids, v.ID)
+			}
+		}
+		requireOK(t, invoke(BitQiuNASControl, map[string]any{"scope": "selected", "ids": ids, "action": "pause"}, true))
+		for _, v := range fs.NASDownloads() {
+			if v.GroupID == group && v.State != "completed" && v.State != "paused" {
+				t.Fatal("folder pause left waiting sibling", v.State)
+			}
+		}
+
 		// Empty subfolder is still queued, so cleaning a completed child must skip the whole group.
 		result := invoke(BitQiuNASClearHistory, map[string]any{"scope": "selected", "ids": []string{folder.Conflicts[0].ID}, "confirmed": true}, true)
 		requireOK(t, result)

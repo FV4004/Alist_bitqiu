@@ -43,33 +43,37 @@ func ClearNASHistory(ids []string, all, removePartials bool, cutoff time.Time) (
 	for _, n := range nasRegistry.tasks {
 		n.mu.Lock()
 		key := nasGroupKey(n.record)
-		idsByTask[n] = n.record.ID
 		groups[key] = append(groups[key], n)
+		idsByTask[n] = n.record.ID
 		n.mu.Unlock()
 	}
 	nasRegistry.Unlock()
-	keys := []string{}
-	for key := range groups {
-		keys = append(keys, key)
+	chosen := map[string][]*nasTask{}
+	locked := []*nasTask{}
+	for key, members := range groups {
+		pick := all || selected[key]
+		for _, n := range members {
+			pick = pick || selected[idsByTask[n]]
+		}
+		if pick {
+			chosen[key] = members
+			locked = append(locked, members...)
+		}
 	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		members := groups[key]
-		sort.Slice(members, func(i, j int) bool { return idsByTask[members[i]] < idsByTask[members[j]] })
-		chosen := all || selected[key]
-		for _, n := range members {
-			if selected[idsByTask[n]] {
-				chosen = true
-			}
+	// Globally ordered action locks make overlapping bulk clears and retries safe.
+	sort.Slice(locked, func(i, j int) bool { return idsByTask[locked[i]] < idsByTask[locked[j]] })
+	for _, n := range locked {
+		n.action.Lock()
+	}
+	defer func() {
+		for i := len(locked) - 1; i >= 0; i-- {
+			locked[i].action.Unlock()
 		}
-		if !chosen {
-			continue
-		}
-		for _, n := range members {
-			n.action.Lock()
-		}
-		nasSaveMu.Lock()
-		nasRegistry.Lock()
+	}()
+	removed := []*nasTask{}
+	nasSaveMu.Lock()
+	nasRegistry.Lock()
+	for _, members := range chosen {
 		valid := true
 		for _, n := range members {
 			n.mu.Lock()
@@ -79,46 +83,45 @@ func ClearNASHistory(ids []string, all, removePartials bool, cutoff time.Time) (
 			}
 			n.mu.Unlock()
 		}
-		// A group is immutable after submission, so it cannot gain new children here.
-		if valid {
-			for _, n := range members {
-				delete(nasRegistry.tasks, n.record.ID)
-			}
+		if !valid {
+			result.Skipped += len(members)
+			continue
+		}
+		for _, n := range members {
+			delete(nasRegistry.tasks, idsByTask[n])
+			removed = append(removed, n)
+		}
+	}
+	nasRegistry.Unlock()
+	var err error
+	if len(removed) > 0 {
+		err = saveNASDownloadsLocked()
+	}
+	if err != nil {
+		nasRegistry.Lock()
+		for _, n := range removed {
+			nasRegistry.tasks[idsByTask[n]] = n
 		}
 		nasRegistry.Unlock()
-		var saveErr error
-		if valid {
-			saveErr = saveNASDownloadsLocked()
-			if saveErr != nil {
-				nasRegistry.Lock()
-				for _, n := range members {
-					nasRegistry.tasks[n.record.ID] = n
-				}
-				nasRegistry.Unlock()
+	}
+	nasSaveMu.Unlock()
+	if err != nil {
+		return result, errors.New("清理记录保存失败，记录已恢复")
+	}
+	result.Deleted = len(removed)
+	for _, n := range removed {
+		if CopyTaskManager != nil {
+			CopyTaskManager.Remove(idsByTask[n])
+		}
+		if removePartials {
+			if err := removeNASPartial(n); err != nil {
+				result.PartialFailures++
 			}
-		}
-		nasSaveMu.Unlock()
-		if valid && saveErr == nil {
-			result.Deleted += len(members)
-			if removePartials {
-				for _, n := range members {
-					if err := removeNASPartial(n); err != nil {
-						result.PartialFailures++
-					}
-				}
-			}
-		} else {
-			result.Skipped += len(members)
-		}
-		for i := len(members) - 1; i >= 0; i-- {
-			members[i].action.Unlock()
-		}
-		if saveErr != nil {
-			return result, errors.New("清理记录保存失败，记录已恢复")
 		}
 	}
 	return result, nil
 }
+
 func startNASHistoryRetention() {
 	// Run at startup and daily even if no browser is open. Keep failed partials;
 	// record retention must never silently delete bytes on the NAS.

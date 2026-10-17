@@ -442,6 +442,10 @@ func TestNASDownloadLifecycle(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dest, changed.Relative), []byte("newer NAS data"), 0600); err != nil {
 			t.Fatal(err)
 		}
+
+		if err := publishNASFile(context.Background(), root, "unused-partial", changed.Relative, &nasTask{record: changed}); err == nil {
+			t.Fatal("final replacement ignored changed target")
+		}
 		if err := QueueNASDownloads([]NASRecord{changed}, user); err != nil {
 			t.Fatal(err)
 		}
@@ -500,6 +504,55 @@ func TestNASDownloadLifecycle(t *testing.T) {
 		if err != nil || result.Deleted != 0 {
 			t.Fatal("cleared incomplete group")
 		}
+		for _, remove := range []bool{false, true} {
+			r := makeTask("changed")
+			r.ID = fmt.Sprintf("hist-part-%v", remove)
+			r.Relative = r.ID
+			r.State = "failed"
+			r.EndTime = &recent
+			if err := os.WriteFile(filepath.Join(dest, nasPart(r)), []byte("partial"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dest, r.Relative), []byte("finished NAS file"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			nasRegistry.Lock()
+			nasRegistry.tasks[r.ID] = &nasTask{record: r}
+			nasRegistry.Unlock()
+			result, err = ClearNASHistory([]string{r.ID}, false, remove, time.Time{})
+			if err != nil || result.Deleted != 1 || result.PartialFailures != 0 {
+				t.Fatalf("partial cleanup: %+v %v", result, err)
+			}
+			_, err = os.Stat(filepath.Join(dest, nasPart(r)))
+			if remove && !os.IsNotExist(err) || !remove && err != nil {
+				t.Fatal("partial cleanup ignored choice", err)
+			}
+			data, _ := os.ReadFile(filepath.Join(dest, r.Relative))
+			if string(data) != "finished NAS file" {
+				t.Fatal("cleanup deleted final NAS file")
+			}
+		}
+		if err := database.Callback().Update().Before("gorm:update").Register("reject_history_test", func(tx *gorm.DB) { tx.AddError(errors.New("fixture DB failure")) }); err != nil {
+			t.Fatal(err)
+		}
+		result, err = ClearNASHistory([]string{"hist-mixed-done"}, false, false, time.Time{})
+		// The mixed group is skipped before writing; test an eligible record as well.
+		rollback := NASRecord{ID: "history-rollback", State: "completed", EndTime: &recent}
+		nasRegistry.Lock()
+		nasRegistry.tasks[rollback.ID] = &nasTask{record: rollback}
+		nasRegistry.Unlock()
+		_, err = ClearNASHistory([]string{rollback.ID}, false, false, time.Time{})
+		database.Callback().Update().Remove("reject_history_test")
+		if err == nil {
+			t.Fatal("history write failure ignored")
+		}
+		if _, ok := nasFind(rollback.ID); !ok {
+			t.Fatal("failed history write lost in-memory record")
+		}
+		nasRegistry.Lock()
+		delete(nasRegistry.tasks, rollback.ID)
+		nasRegistry.Unlock()
+
 		// Keep generated fixture tasks out of the following persistence test.
 		nasRegistry.Lock()
 		for _, r := range fixtures {

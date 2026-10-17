@@ -155,15 +155,20 @@ func BitQiuNASPrepare(c *gin.Context) {
 	}
 	// Refuse an occupied destination before asking about overwrite. A duplicate
 	// live/paused/failed transfer is controlled through its original task.
-	existing := fs.NASDownloads()
-	for _, r := range records {
-		for _, v := range existing {
-			if v.Root == r.Root && v.Relative == r.Relative && v.State != "completed" && v.State != "canceled" {
-				common.ErrorStrResp(c, "该目标已有任务，请操作原任务或选择其他目录："+r.Name, 409)
-				return
-			}
+
+	occupied := map[string]bool{}
+	for _, v := range fs.NASDownloads() {
+		if v.State != "completed" && v.State != "canceled" {
+			occupied[v.Root+"\x00"+v.Relative] = true
 		}
 	}
+	for _, r := range records {
+		if occupied[r.Root+"\x00"+r.Relative] {
+			common.ErrorStrResp(c, "该目标已有任务，请操作原任务或选择其他目录："+r.Name, 409)
+			return
+		}
+	}
+
 	plan := &nasPlan{owner: user.ID, expires: time.Now().Add(15 * time.Minute), records: records, conflicts: conflicts}
 	id := rand.Text()
 	nasPlans.Lock()
