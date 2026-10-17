@@ -11,6 +11,34 @@
   state.leaves=[];state.expanded=new Set();state.sourceComplete=false;state.sourceRows=new Map();state.sourceController=null;state.targetItems=[];
   const categories=[['folder','文件夹'],['video','视频'],['audio','音频'],['image','图片'],['document','文档'],['archive','压缩包'],['code','代码'],['file','其他']];
   state.targetTypes=new Set(categories.map(x=>x[0]));
+  const {matches,DirectoryCache}=window.NASPicker;
+  const sourceCache=new DirectoryCache(),targetCache=new DirectoryCache();
+  state.sourceQuery='';state.targetQuery='';state.targetReady=false;
+  const sourceVisible=()=>state.items.filter(file=>matches(file.name,state.sourceQuery));
+  function remember(side){
+    const source=side==='source',cache=source?sourceCache:targetCache,root=state[side+'Root'],path=state[side];
+    if(!path||state[side+'LoadedKey']!==cache.key(root,path)||(source?(!state.sourceComplete||state.loading):!state.targetReady))return;
+    const snapshot={items:source?state.items:state.targetItems,query:state[side+'Query'],scroll:source?$('source-files').closest('.table-scroll').scrollTop:$('target-folders').scrollTop};
+    if(source)Object.assign(snapshot,{selected:new Set(state.selected),meta:new Map(state.selectedMeta),orderBy:state.orderBy,orderDirection:state.orderDirection});
+    else snapshot.types=new Set(state.targetTypes);
+    cache.put(root,path,snapshot);
+  }
+  function pickerHistory(replace=false){
+    const nasPicker={source:state.source,sourceRoot:state.sourceRoot,target:state.target,targetRoot:state.targetRoot};
+    history[replace?'replaceState':'pushState']({...history.state,nasPicker},'',location.href);
+  }
+  async function navigate(side,path,root=state[side+'Root'],record=true){
+    if(path===state[side]&&root===state[side+'Root'])return;
+    remember(side);state[side+'Root']=root;state[side]=path;state[side+'Query']='';$(side+'-storage').value=root;
+    if(side==='source'){state.selected.clear();state.selectedMeta.clear();selectionKey='';}
+    if(record)pickerHistory();
+    return side==='source'?loadSource(false):loadTarget();
+  }
+  window.addEventListener('popstate',event=>{const saved=event.state?.nasPicker;if(!saved)return;
+    run(async()=>{const actions=[];for(const [side,roots]of [['source',state.cloud],['target',state.targets]]){
+      const root=saved[side+'Root'],path=saved[side];if(roots.some(x=>x.path===root)&&typeof path==='string'&&within(path,root))actions.push(navigate(side,path,root,false));
+    }await Promise.all(actions);})();
+  });
   const bytes = n => {if(!Number.isFinite(n)||n<0)return '—';const u=['B','KB','MB','GB','TB'];let i=0;while(n>=1024&&i<4){n/=1024;i++;}return `${n.toFixed(i?1:0)} ${u[i]}`;};
   let errorOrigin;
   function showError(message,title='操作失败',context='',origin){
@@ -70,24 +98,30 @@
     }else{let known=0,unknown=0;for(const file of files){if(file?.size_known===true&&Number.isFinite(file.size)&&file.size>=0)known+=file.size;else unknown++;}showTotal(known,unknown);}
   }
   function showTotal(known,unknown){$('selection-total').textContent=unknown?`已知大小：${bytes(known)}，另有 ${unknown} 个文件大小未知`:`本次下载总大小：${bytes(known)}`;}
-  function selectedUI(){const n=state.selected.size;$('source-count').textContent=`${state.sourceComplete?'共':'已读取'} ${state.total} 项 · 已选 ${n} 项`;$('download').textContent=`下载已选 ${n} 项到 NAS`;$('download').disabled=!n||!state.target||state.loading||!state.sourceComplete||state.submitting||state.selectAllBusy;$('save-to').textContent=state.target||'尚未选择目标目录';$('select-page').disabled=state.selectAllBusy||state.loading||!state.sourceComplete;$('select-page').checked=state.selectAllBusy||(state.total>0&&n===state.total);$('select-page').indeterminate=state.selectAllBusy||(n>0&&n<state.total);for(const check of $('source-files').querySelectorAll('input[type=checkbox]')){check.checked=state.selected.has(check.dataset.name);check.disabled=state.loading||!state.sourceComplete;}selectionSummary();}
+  function selectedUI(){const n=state.selected.size,visible=sourceVisible(),marked=visible.filter(file=>state.selected.has(file.name)).length,query=state.sourceQuery.trim();$('source-count').textContent=`${state.sourceComplete?'共':'已读取'} ${state.total} 项${query?' · 匹配 '+visible.length+' 项':''} · 已选 ${n} 项${query&&n>marked?'（筛选外 '+(n-marked)+' 项）':''}`;$('download').textContent=`下载已选 ${n} 项到 NAS`;$('download').disabled=!n||!state.target||state.loading||!state.sourceComplete||state.submitting||state.selectAllBusy;$('save-to').textContent=state.target||'尚未选择目标目录';$('select-page').disabled=state.selectAllBusy||state.loading||!state.sourceComplete||!visible.length;$('select-page').checked=state.selectAllBusy||(visible.length>0&&marked===visible.length);$('select-page').indeterminate=state.selectAllBusy||(marked>0&&marked<visible.length);$('select-page').parentElement.lastChild.textContent=query?'全选搜索结果':'全选当前目录';for(const check of $('source-files').querySelectorAll('input[type=checkbox]')){check.checked=state.selected.has(check.dataset.name);check.disabled=state.loading||!state.sourceComplete;}selectionSummary();}
   function options(id,items,placeholder){const select=$(id);select.replaceChildren();if(!items.length){const o=el('option',placeholder);o.value='';select.append(o);}for(const t of items){const o=el('option',t.label);o.value=t.path;select.append(o);}}
-  async function targets(){const data=await api('/admin/bitqiu/nas/targets');state.cloud=data.cloud||[];state.targets=data.targets||[];options('source-storage',state.cloud,'尚未配置 BitQiu 存储');options('target-storage',state.targets,'尚未启用本地目录');$('setup').hidden=!!data.downloads_enabled;$('enable').disabled=!data.downloads_ready;$('enable').title=data.downloads_ready?'将 /downloads 添加为本地存储':'尚未检测到 /downloads 挂载目录';const requested=new URLSearchParams(location.search).get('path')||'';const src=state.cloud.find(x=>within(requested,x.path))||state.cloud[0];state.source='';state.sourceRoot='';state.target='';state.targetRoot='';state.selected.clear();state.selectedMeta.clear();if(src){state.sourceRoot=src.path;state.source=within(requested,src.path)?requested:src.path;$('source-storage').value=src.path;}const preferred=state.targets.find(x=>x.path==='/NAS下载')||state.targets[0];if(preferred){state.targetRoot=preferred.path;state.target=state.targetRoot;$('target-storage').value=state.targetRoot;}await Promise.all([loadSource(false),loadTarget(),loadTasks()]);if(!state.cloud.length)notice('请先在 AList 存储管理中配置并登录 BitQiu。',true);}
+  async function targets(){sourceCache.clear();targetCache.clear();state.sourceQuery='';state.targetQuery='';const data=await api('/admin/bitqiu/nas/targets');state.cloud=data.cloud||[];state.targets=data.targets||[];options('source-storage',state.cloud,'尚未配置 BitQiu 存储');options('target-storage',state.targets,'尚未启用本地目录');$('setup').hidden=!!data.downloads_enabled;$('enable').disabled=!data.downloads_ready;$('enable').title=data.downloads_ready?'将 /downloads 添加为本地存储':'尚未检测到 /downloads 挂载目录';const requested=new URLSearchParams(location.search).get('path')||'';const src=state.cloud.find(x=>within(requested,x.path))||state.cloud[0];state.source='';state.sourceRoot='';state.target='';state.targetRoot='';state.selected.clear();state.selectedMeta.clear();if(src){state.sourceRoot=src.path;state.source=within(requested,src.path)?requested:src.path;$('source-storage').value=src.path;}const preferred=state.targets.find(x=>x.path==='/NAS下载')||state.targets[0];if(preferred){state.targetRoot=preferred.path;state.target=state.targetRoot;$('target-storage').value=state.targetRoot;}await Promise.all([loadSource(false),loadTarget(),loadTasks()]);pickerHistory(true);if(!state.cloud.length)notice('请先在 AList 存储管理中配置并登录 BitQiu。',true);}
   function sourceRow(file){
     const tr=el('tr'),checkCell=el('td'),check=el('input');check.type='checkbox';check.dataset.name=file.name;check.setAttribute('aria-label','选择 '+file.name);check.onchange=()=>{choose(file,check.checked);selectedUI();};const label=el('label',undefined,'file-check');label.append(check);checkCell.append(label);
     const nameCell=el('td'),heading=el('div',undefined,'file-heading');
-    if(file.is_dir){const button=el('button',undefined,'file-name');button.append(icon(file.name,true),el('span',file.name));button.onclick=run(()=>{state.source=join(state.source,file.name);clearSelection();return loadSource(false);});heading.append(button);}else heading.append(icon(file.name,false),el('span',file.name));
+    if(file.is_dir){const button=el('button',undefined,'file-name');button.append(icon(file.name,true),el('span',file.name));button.onclick=run(()=>navigate('source',join(state.source,file.name)));heading.append(button);}else heading.append(icon(file.name,false),el('span',file.name));
     nameCell.append(heading,el('div',`${file.is_dir?'文件夹':file.size_known===false?'大小未知':bytes(file.size)} · 修改于 ${dateText(file.modified)}`,'file-meta'));tr.append(checkCell,nameCell);return tr;
   }
   function renderSource(){
-    const items=[...state.items];const cmp=(a,b)=>{let delta=0;if(state.orderBy==='modified')delta=(Date.parse(a.modified)||0)-(Date.parse(b.modified)||0);else if(state.orderBy==='size')delta=(a.size||0)-(b.size||0);else delta=a.name.toLowerCase()<b.name.toLowerCase()?-1:a.name.toLowerCase()>b.name.toLowerCase()?1:0;if(delta)return state.orderDirection==='desc'?-delta:delta;return a.name<b.name?-1:a.name>b.name?1:0;};items.sort(cmp);
+    const items=sourceVisible();const cmp=(a,b)=>{let delta=0;if(state.orderBy==='modified')delta=(Date.parse(a.modified)||0)-(Date.parse(b.modified)||0);else if(state.orderBy==='size')delta=(a.size||0)-(b.size||0);else delta=a.name.toLowerCase()<b.name.toLowerCase()?-1:a.name.toLowerCase()>b.name.toLowerCase()?1:0;if(delta)return state.orderDirection==='desc'?-delta:delta;return a.name<b.name?-1:a.name>b.name?1:0;};items.sort(cmp);
     const fragment=document.createDocumentFragment(),scroll=$('source-files').closest('.table-scroll'),top=scroll.scrollTop;
     for(const file of items){let row=state.sourceRows.get(file.name);if(!row){row=sourceRow(file);state.sourceRows.set(file.name,row);}fragment.append(row);}
-    if(!items.length){const row=el('tr'),cell=el('td',state.loading?'正在读取目录，内容将逐批显示…':state.sourceComplete?'此目录为空':'目录未加载完成，请刷新重试','empty');cell.colSpan=2;row.append(cell);fragment.append(row);}
+    if(!items.length){const row=el('tr'),cell=el('td',state.sourceQuery.trim()?'没有匹配的名称，请调整或清除搜索。':state.loading?'正在读取目录，内容将逐批显示…':state.sourceComplete?'此目录为空':'目录未加载完成，请刷新重试','empty');cell.colSpan=2;row.append(cell);fragment.append(row);}
     $('source-files').replaceChildren(fragment);scroll.scrollTop=top;selectedUI();
   }
   async function loadSource(refresh=false){
     const seq=++state.sourceSeq;state.sourceController?.abort();state.sourceController=new AbortController();const signal=state.sourceController.signal;
+    const key=sourceCache.key(state.sourceRoot,state.source);state.sourceLoadedKey=key;
+    if(refresh)sourceCache.delete(state.sourceRoot,state.source);
+    const saved=refresh?null:sourceCache.get(state.sourceRoot,state.source);
+    if(saved){state.items=saved.items;state.total=saved.items.length;state.sourceRows=new Map();state.sourceComplete=true;state.loading=false;state.sourceQuery=saved.query;state.selected=new Set(saved.selected);state.selectedMeta=new Map(saved.meta);state.orderBy=saved.orderBy;state.orderDirection=saved.orderDirection;$('source-search').value=saved.query;$('source-search-clear').disabled=!saved.query;$('sort-order').value=saved.orderBy+':'+saved.orderDirection;$('source-path').textContent=state.source;$('source-up').disabled=state.source===state.sourceRoot;$('source-loading').textContent=`已恢复目录 · ${state.total} 项（每个文件夹仅计 1 项；刷新可获取最新内容）`;renderSource();$('source-files').closest('.table-scroll').scrollTop=saved.scroll;return;}
+    $('source-search').value=state.sourceQuery;$('source-search-clear').disabled=!state.sourceQuery;
+    $('source-files').closest('.table-scroll').scrollTop=0;
     state.items=[];state.total=0;state.sourceRows=new Map();state.sourceComplete=false;state.loading=!!state.source;$('source-path').textContent=state.source;$('source-up').disabled=!state.source||state.source===state.sourceRoot;
     $('source-loading').textContent=state.source?'正在连接，目录内容将逐批显示…':'请选择 BitQiu 存储';renderSource();if(!state.source)return;
     let reader;
@@ -101,18 +135,29 @@
       if(!doneFrame||doneFrame.total!==known.size)throw Error('目录连接中断，内容尚未加载完整，请刷新重试。');
       if(seq!==state.sourceSeq)return;state.sourceComplete=true;$('source-loading').textContent=`加载完成 · ${state.total} 项（每个文件夹仅计 1 项，不计其内部文件）`;
     }catch(error){if(seq!==state.sourceSeq||error.name==='AbortError')return;$('source-loading').textContent=`加载失败 · 已读取 ${state.total} 项，当前结果不完整，请刷新重试`;throw error;}
-    finally{if(reader){try{await reader.cancel();}catch{}reader.releaseLock();}if(seq===state.sourceSeq){state.loading=false;renderSource();}}
+    finally{if(reader){try{await reader.cancel();}catch{}reader.releaseLock();}if(seq===state.sourceSeq){state.loading=false;renderSource();remember('source');}}
   }
   function renderTarget(){
-    $('target-folders').replaceChildren();const shown=state.targetItems.filter(item=>state.targetTypes.has(window.NASIcons.type(item.name,item.is_dir)));
+    $('target-folders').replaceChildren();const shown=state.targetItems.filter(item=>state.targetTypes.has(window.NASIcons.type(item.name,item.is_dir))&&matches(item.name,state.targetQuery));
     shown.sort((a,b)=>Number(b.is_dir)-Number(a.is_dir)||a.name.localeCompare(b.name,'zh-CN',{numeric:true}));
-    for(const item of shown){const button=el('button',undefined,'folder'+(!item.selectable?' unavailable-file':''));button.disabled=!item.selectable;button.setAttribute('aria-label',item.selectable?'打开 NAS 文件夹 '+item.name:'不可选择文件 '+item.name);button.append(icon(item.name,item.is_dir),el('span',item.name),el('span',item.selectable?'›':item.is_dir?'不可选择':item.size_known?bytes(item.size):'文件 · 不可选择'));if(item.selectable)button.onclick=run(()=>{state.target=join(state.target,item.path);return loadTarget();});$('target-folders').append(button);}
-    if(!shown.length)$('target-folders').append(el('p',state.targetItems.length?'当前分类没有内容，请调整筛选或重置为全选。':'此目录为空，可以直接保存到这里。','empty'));
+    for(const item of shown){const button=el('button',undefined,'folder'+(!item.selectable?' unavailable-file':''));button.disabled=!item.selectable;button.setAttribute('aria-label',item.selectable?'打开 NAS 文件夹 '+item.name:'不可选择文件 '+item.name);button.append(icon(item.name,item.is_dir),el('span',item.name),el('span',item.selectable?'›':item.is_dir?'不可选择':item.size_known?bytes(item.size):'文件 · 不可选择'));if(item.selectable)button.onclick=run(()=>navigate('target',join(state.target,item.path)));$('target-folders').append(button);}
+    if(!shown.length)$('target-folders').append(el('p',state.targetItems.length?(state.targetQuery.trim()?'没有匹配的名称，请调整搜索或分类筛选。':'当前分类没有内容，请调整筛选或重置为全选。'):'此目录为空，可以直接保存到这里。','empty'));
     $('target-count').textContent=`显示 ${shown.length} / ${state.targetItems.length} 项`;
     $('target-filter-summary').textContent=state.targetTypes.size===categories.length?'分类：全部':state.targetTypes.size===0?'分类：未选':`分类：已选 ${state.targetTypes.size} 类`;
     for(const check of $('target-filter-options').querySelectorAll('input'))check.checked=state.targetTypes.has(check.value);
   }
-  async function loadTarget(){const seq=++state.targetSeq;state.targetItems=[];$('target-folders').replaceChildren(el('p','正在读取 NAS 目录…','empty'));$('target-path').textContent=state.target||'请选择挂载后的本地目录';$('target-up').disabled=!state.target||state.target===state.targetRoot;selectedUI();if(!state.target){$('target-folders').replaceChildren();$('target-count').textContent='';return;}const entries=await api('/admin/bitqiu/nas/entries',{path:state.target});if(seq!==state.targetSeq)return;state.targetItems=entries||[];renderTarget();}
+  async function loadTarget(refresh=false){
+    const seq=++state.targetSeq;state.targetReady=false;state.targetLoadedKey=targetCache.key(state.targetRoot,state.target);
+    if(refresh)targetCache.delete(state.targetRoot,state.target);
+    const saved=refresh?null:targetCache.get(state.targetRoot,state.target);
+    $('target-path').textContent=state.target||'请选择挂载后的本地目录';$('target-up').disabled=!state.target||state.target===state.targetRoot;
+    if(saved){state.targetItems=saved.items;state.targetQuery=saved.query;state.targetTypes=new Set(saved.types);state.targetReady=true;}
+    $('target-search').value=state.targetQuery;$('target-search-clear').disabled=!state.targetQuery;selectedUI();
+    if(saved){renderTarget();$('target-folders').scrollTop=saved.scroll;return;}
+    state.targetItems=[];$('target-folders').scrollTop=0;$('target-folders').replaceChildren(el('p','正在读取 NAS 目录…','empty'));
+    if(!state.target){$('target-folders').replaceChildren();$('target-count').textContent='';return;}
+    const entries=await api('/admin/bitqiu/nas/entries',{path:state.target});if(seq!==state.targetSeq)return;state.targetItems=entries||[];state.targetReady=true;renderTarget();remember('target');
+  }
   function dateText(value){const d=new Date(value);return value&&Number.isFinite(d.getTime())&&d.getUTCFullYear()>1?d.toLocaleString('zh-CN',{hour12:false}):'未知时间';}
   const taskStates={waiting:'等待中',downloading:'下载中',pausing:'暂停中',paused:'已暂停',completed:'已完成',failed:'下载失败',canceling:'取消中',canceled:'已取消'};
   const reasons={skipped:'已跳过',partial_failed:'部分失败',partial_canceled:'部分取消',completed:'正常结束',user_canceled:'用户取消',canceled:'已取消',timeout:'超时',failed:'失败'};
@@ -168,19 +213,25 @@
   $('target-filter-reset').onclick=()=>{state.targetTypes=new Set(categories.map(x=>x[0]));renderTarget();};
   document.addEventListener('pointerdown',event=>{const filter=$('target-filter');if(filter.open&&!filter.contains(event.target))filter.open=false;});
   $('target-filter').addEventListener('keydown',event=>{if(event.key==='Escape'){$('target-filter').open=false;$('target-filter-summary').focus();}});
+  for(const side of ['source','target']){
+    const update=()=>{state[side+'Query']=$(side+'-search').value;$(side+'-search-clear').disabled=!state[side+'Query'];if(side==='source'){renderSource();$('source-files').closest('.table-scroll').scrollTop=0;}else{renderTarget();$('target-folders').scrollTop=0;}};
+    $(side+'-search').oninput=event=>{if(!event.isComposing)update();};$(side+'-search').oncompositionend=update;
+    $(side+'-search-clear').onclick=()=>{$(side+'-search').value='';update();$(side+'-search').focus();};
+  }
   $('home').href=base+'/';
-  $('source-storage').onchange=run(()=>{state.sourceRoot=$('source-storage').value;state.source=state.sourceRoot;state.selected.clear();state.selectedMeta.clear();return loadSource(false);});
-  $('target-storage').onchange=run(()=>{state.targetRoot=$('target-storage').value;state.target=state.targetRoot;return loadTarget();});
-  $('source-up').onclick=run(()=>{state.source=parent(state.source,state.sourceRoot);state.selected.clear();state.selectedMeta.clear();return loadSource(false);});
-  $('target-up').onclick=run(()=>{state.target=parent(state.target,state.targetRoot);return loadTarget();});
+  $('source-storage').onchange=run(()=>navigate('source',$('source-storage').value,$('source-storage').value));
+  $('target-storage').onchange=run(()=>navigate('target',$('target-storage').value,$('target-storage').value));
+  $('source-up').onclick=run(()=>navigate('source',parent(state.source,state.sourceRoot)));
+  $('target-up').onclick=run(()=>navigate('target',parent(state.target,state.targetRoot)));
+  $('target-refresh').onclick=run(()=>loadTarget(true));
   $('source-refresh').onclick=run(()=>{state.selected.clear();state.selectedMeta.clear();return loadSource(true);});
   $('sort-order').onchange=()=>{[state.orderBy,state.orderDirection]=$('sort-order').value.split(':');renderSource();$('source-files').closest('.table-scroll').scrollTop=0;};
-  $('select-page').onchange=run(()=>{if(!$('select-page').checked){clearSelection();return;}if(!state.sourceComplete||state.loading)return;if(state.items.length>50000)throw Error('目录超过 50000 项，请分批选择。');for(const file of state.items)choose(file,true);selectedUI();});
+  $('select-page').onchange=run(()=>{if(!state.sourceComplete||state.loading)return;const visible=sourceVisible();if(visible.length>50000)throw Error('结果超过 50000 项，请缩小搜索范围或分批选择。');for(const file of visible)choose(file,$('select-page').checked);selectedUI();});
   $('clear-selection').onclick=clearSelection;
   $('enable').onclick=run(async()=>{await api('/admin/bitqiu/nas/enable',{});notice('NAS 目录已启用，可以逐级选择保存位置。');await targets();});
   $('reload').onclick=run(targets);
-  $('mkdir').onclick=run(async()=>{if(!state.target)throw Error('请先选择 NAS 保存目录。');const name=$('new-folder-name').value.trim();if(!name)throw Error('请输入新文件夹名称。');await api('/admin/bitqiu/nas/mkdir',{path:state.target,name});$('new-folder-name').value='';await loadTarget();});
-  $('download').onclick=run(async()=>{if(!state.selected.size||!state.target||state.submitting)return;state.submitting=true;selectedUI();try{const data=await submitDownload();if(!data)return;state.selected.clear();state.selectedMeta.clear();selectedUI();notice(`已提交 ${(data.tasks||[]).length} 个后台任务。文件将保存到 ${state.target}。`);await loadTasks();}finally{state.submitting=false;selectedUI();}});
+  $('mkdir').onclick=run(async()=>{if(!state.target)throw Error('请先选择 NAS 保存目录。');const name=$('new-folder-name').value.trim();if(!name)throw Error('请输入新文件夹名称。');await api('/admin/bitqiu/nas/mkdir',{path:state.target,name});$('new-folder-name').value='';await loadTarget(true);});
+  $('download').onclick=run(async()=>{if(!state.selected.size||!state.target||state.submitting)return;state.submitting=true;selectedUI();try{const data=await submitDownload();if(!data)return;targetCache.clear();state.targetReady=false;state.selected.clear();state.selectedMeta.clear();selectedUI();notice(`已提交 ${(data.tasks||[]).length} 个后台任务。文件将保存到 ${state.target}。`);await loadTasks();}finally{state.submitting=false;selectedUI();}});
   for(const scope of ['all','batch'])for(const action of ['start','pause','cancel'])$(scope+'-'+action).onclick=run(()=>taskAction(action,scope==='all'?'all':'selected',[...state.taskSelected]));
   $('task-select-all').onchange=()=>{for(const task of taskGroup())for(const id of taskIDs(task)){if($('task-select-all').checked)state.taskSelected.add(id);else state.taskSelected.delete(id);}taskSelectionUI();};
   $('active-tab').onclick=()=>taskTab(false);

@@ -29,7 +29,7 @@ jobs:
           go test -race ./internal/fs -run '^TestNAS' || task_test_status=1
           go test -race ./internal/task || task_test_status=1
           go test -race ./server/nasui || task_test_status=1
-          node --test scripts/nas-ui.test.cjs || task_test_status=1
+          node --test scripts/nas-ui.test.cjs scripts/nas-picker.test.cjs || task_test_status=1
           exit "$task_test_status"
       - name: Download matching official frontend
         run: |
@@ -47,6 +47,7 @@ jobs:
           python scripts/test-nas-browser.py
           python scripts/test-nas-stream.py
           python scripts/test-nas-auth.py
+          python scripts/test-nas-picker.py
       - name: Install musl toolchain for static SQLite support
         run: sudo apt-get update -qq && sudo apt-get install -y musl-tools
       - name: Build linux amd64 binary

@@ -133,3 +133,9 @@ python scripts/test-nas-browser.py
 新增 `server/nasui/handoff_test.go` 验证非管理员禁止发放、单次兑换、并发仅一次成功、过期与内存限额；新增 `scripts/test-nas-auth.py` 在 Chromium 和 WebKit、390px 移动布局、根路径及 `/alist` 前缀下验证登录存储丢失、刷新恢复、两类存储均被禁用时的内存交接、设备标识传递及错误分类。原登录、流式列表、下载管理和传输测试保留。最终通过情况见本次修复提交的 GitHub Actions；未进行极空间 iOS App 实机测试。
 
 本次修复检查已在 [GitHub Actions 39034205342](https://github.com/FV4004/Alist_bitqiu/actions/runs/39034205342) 通过：全部 NAS 后端 race、BitQiu 协议、7 项导航 Node 回归、官方前端登录/下载往返、TEST-01～12 相关 UI 与真实传输回归、实际 HTTP 流式首批显示，以及 Chromium/WebKit 各 2 个路径认证场景均成功。极空间 App/iOS 27.0.1 实机尚待更新后验证。
+
+## v18：路径选择搜索及免重载返回
+
+新增 `picker.js` 和 `nas-picker.test.cjs`，验证 Unicode/全半角/大小写/不连续字符/多关键词匹配、目录及存储隔离、LRU 目录与总条目限额。新增 `test-nas-picker.py`，在 Chromium/WebKit、390px 移动布局、根路径与 `/alist` 前缀下测试：搜索与隐藏选择提示、搜索结果全选、上一级及浏览器后退/前进不增加目录 API 次数、筛选/排序/选择/滚动恢复、显式刷新请求、新建文件夹/提交下载失效、不缓存失败的流式结果、NAS 迟到响应不覆盖父目录及页面无横向溢出。原登录、流式与任务回归保持。结果以本次提交 Actions 为准；极空间 App 实机需更新后验证。
+
+本轮 [完整检查 39049605605](https://github.com/FV4004/Alist_bitqiu/actions/runs/39049605605) 已通过：后端 race、原任务和登录回归、10 项 Node 用例、流式 HTTP，以及 Chromium/WebKit 各 2 个路径选择场景。测试通过目录 API 请求计数确认缓存返回未重新加载，覆盖失败缓存与迟到响应防护。
