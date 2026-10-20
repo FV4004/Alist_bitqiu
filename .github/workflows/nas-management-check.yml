@@ -40,6 +40,7 @@ jobs:
           python scripts/test-nas-stream.py
           python scripts/test-nas-auth.py
           python scripts/test-nas-picker.py
+          python scripts/test-nas-compare.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -40,6 +40,7 @@ with sync_playwright() as p:
     elif endpoint=='/admin/bitqiu/nas/commit':requests.append(body);data={'tasks':[{'id':'fixture-task'}]}
     elif endpoint=='/admin/bitqiu/nas/history/clear':
      requests.append(body);assert body['confirmed'];selected=set(body['ids']);removed=[t for t in tasks if t['state'] in ['completed','failed','canceled'] and (body['scope']=='all' or t['id'] in selected or t.get('group_id') in selected)];tasks[:]=[t for t in tasks if t not in removed];data={'deleted':len(removed),'skipped':0,'partial_failures':0}
+    elif endpoint=='/admin/bitqiu/nas/scan/status':data={'job':None,'result':None}
     elif endpoint=='/admin/bitqiu/nas/tasks':data={'active':[caps(t) for t in tasks if t['state'] not in ['completed','canceled','failed']],'history':[caps(t) for t in tasks if t['state'] in ['completed','canceled','failed']],'concurrency':{'limit':cfg['limit'],'maximum':5,'running':sum(t['state']=='downloading' for t in tasks)}}
     elif endpoint=='/admin/bitqiu/nas/concurrency':
      if cfg['fail_next']:

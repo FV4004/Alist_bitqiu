@@ -219,3 +219,7 @@ NAS 页统一文件类型 SVG 图标；下载前询问同名文件替换/跳过�
 ## 单向补缺测试构建（非生产发布）
 
 `nas-management-compare-preview` 分支增加统一排序和“以网盘为准补齐 NAS 缺失项”的人工复核流程。本次仅在 Actions 保存可导入镜像与二进制，不推送 Docker Hub/GHCR，不更新生产 latest。导入、限制及测试说明见 [NAS_COMPARE_PREVIEW.md](docs/NAS_COMPARE_PREVIEW.md)。
+
+### 后台缺失扫描
+
+v3.65.0-bitqiu.20 支持按左侧勾选范围后台扫描 NAS 缺失项目、分阶段进度、上次完整扫描时间和持久化缓存；网盘列表新增内容追加末尾，支持加载期间逐项勾选。[使用规则与缓存说明](docs/NAS_BACKGROUND_SCAN.md)。

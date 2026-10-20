@@ -619,5 +619,6 @@ func TestBitQiuNASIntegration(t *testing.T) {
 		}
 	})
 	t.Run("one-way compare preview confirm and no overwrite", func(t *testing.T) { testNASCompare(t, source, dest, outside, invoke) })
+	t.Run("background scan persistence and selected scope", func(t *testing.T) { testNASBackgroundScan(t, source, dest, invoke) })
 
 }

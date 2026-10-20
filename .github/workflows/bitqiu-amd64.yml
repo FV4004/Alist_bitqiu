@@ -48,6 +48,7 @@ jobs:
           python scripts/test-nas-stream.py
           python scripts/test-nas-auth.py
           python scripts/test-nas-picker.py
+          python scripts/test-nas-compare.py
       - name: Install musl toolchain for static SQLite support
         run: sudo apt-get update -qq && sudo apt-get install -y musl-tools
       - name: Build linux amd64 binary

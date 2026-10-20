@@ -34,6 +34,7 @@ with sync_playwright() as p:
       calls['target:'+body['path']]+=1
       if cfg['hold_target'] and body['path']!='/NAS下载':held.append(r);return
       return reply(r,targets if body['path']=='/NAS下载' else [{'name':'第二季','path':'第二季','is_dir':True,'selectable':True}])
+     if path.endswith('/scan/status'):return reply(r,{'job':None,'result':None})
      if path.endswith('/tasks'):return reply(r,{'active':[],'history':[],'concurrency':{'limit':5,'running':0}})
      if path.endswith('/stats'):return reply(r,{'known_bytes':100,'unknown_count':0,'file_count':1})
      if path.endswith('/mkdir'):

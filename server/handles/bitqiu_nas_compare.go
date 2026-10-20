@@ -35,6 +35,7 @@ type nasCompareItem struct {
 	Size       int64    `json:"size"`
 	Candidates []string `json:"candidates,omitempty"`
 	Blocked    bool     `json:"blocked"`
+	ObjectID   string   `json:"-"`
 	obj        model.Obj
 	src        string
 }
@@ -50,6 +51,9 @@ type nasComparison struct {
 	sourceVirtual, destination, root, targetBase, targetMount string
 	items                                                     []nasCompareItem
 	issues                                                    []nasCompareIssue
+	sourceMount                                               string
+	inventory                                                 map[string][]model.Obj
+	inventoryErrors                                           map[string]bool
 }
 type nasComparePlan struct {
 	mu      sync.Mutex
@@ -187,7 +191,16 @@ func scanNASComparison(ctx context.Context, s *nasComparison, actual string, tar
 			return nil
 		}
 		args := model.ListArgs{Refresh: true, NoUpdateIndex: true, OnPage: func(_ []model.Obj) error { return emit(rel, visited) }}
-		children, err := op.List(ctx, s.source, src, args)
+		var children []model.Obj
+		var err error
+		if s.inventory != nil {
+			children = s.inventory[src]
+			if s.inventoryErrors[src] {
+				err = errors.New("incomplete enumeration")
+			}
+		} else {
+			children, err = op.List(ctx, s.source, src, args)
+		}
 		if err != nil {
 			issue(rel, "网盘目录读取失败，未判定此分支缺失")
 			return nil
@@ -216,6 +229,9 @@ func scanNASComparison(ctx context.Context, s *nasComparison, actual string, tar
 				return err
 			}
 			visited++
+			if err := emit(rel, visited); err != nil {
+				return err
+			}
 			if visited > compareLimit {
 				return errors.New("扫描超过 50000 项，请缩小范围")
 			}
@@ -277,7 +293,7 @@ func scanNASComparison(ctx context.Context, s *nasComparison, actual string, tar
 				if !obj.IsDir() && model.ObjectSizeKnown(obj) {
 					size = obj.GetSize()
 				}
-				s.items = append(s.items, nasCompareItem{ID: rand.Text(), Relative: relative, IsDir: obj.IsDir(), Category: category, Size: size, Candidates: candidates, obj: obj, src: path.Join(src, name)})
+				s.items = append(s.items, nasCompareItem{ID: rand.Text(), Relative: relative, IsDir: obj.IsDir(), Category: category, Size: size, Candidates: candidates, ObjectID: obj.GetID(), obj: obj, src: path.Join(src, name)})
 			}
 			if obj.IsDir() {
 				key := obj.GetID()
@@ -289,7 +305,11 @@ func scanNASComparison(ctx context.Context, s *nasComparison, actual string, tar
 					continue
 				}
 				ancestors[key] = true
-				timer := time.NewTimer(150 * time.Millisecond)
+				delay := 150 * time.Millisecond
+				if s.inventory != nil {
+					delay = 0
+				}
+				timer := time.NewTimer(delay)
 				select {
 				case <-ctx.Done():
 					timer.Stop()
@@ -445,6 +465,9 @@ func BitQiuNASComparePrepare(c *gin.Context) {
 	cleanComparisons()
 	s := nasComparisons.scans[req.ScanID]
 	nasComparisons.Unlock()
+	if s == nil {
+		s = restoreNASScan(user, req.ScanID)
+	}
 	if s == nil || s.owner != user.ID {
 		common.ErrorStrResp(c, "扫描快照已过期，请重新扫描", 409)
 		return
@@ -464,7 +487,7 @@ func BitQiuNASComparePrepare(c *gin.Context) {
 	}
 	// Revalidate the mounts and role permissions before constructing real task records.
 	source, _, _, err := nasSelectionSource(user, s.sourceVirtual)
-	if err != nil || source.GetStorage().MountPath != s.source.GetStorage().MountPath {
+	if err != nil || source.GetStorage().MountPath != comparisonSourceMount(s) {
 		common.ErrorStrResp(c, "来源存储已变化，请重新扫描", 409)
 		return
 	}
@@ -514,7 +537,7 @@ func BitQiuNASComparePrepare(c *gin.Context) {
 			continue
 		}
 		obj, e := op.Get(c.Request.Context(), source, v.src)
-		if e != nil || obj.IsDir() != v.IsDir || (v.obj.GetID() != "" && obj.GetID() != v.obj.GetID()) {
+		if e != nil || obj.IsDir() != v.IsDir || (v.ObjectID != "" && obj.GetID() != v.ObjectID) {
 			skipped = append(skipped, nasCompareSkip{v.Relative, "来源已改变，请重新扫描"})
 			continue
 		}

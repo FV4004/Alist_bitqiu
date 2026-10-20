@@ -24,6 +24,7 @@ for prefix in ['', '/alist']:
   def do_POST(self):
    body=json.loads(self.rfile.read(int(self.headers.get('Content-Length','0'))));path=self.path.removeprefix(prefix)
    if path.endswith('/targets'):return self.json({'cloud':[{'path':'/cloud','label':'cloud'}],'targets':[{'path':'/NAS','label':'NAS'}],'downloads_enabled':True})
+   if path.endswith('/scan/status'):return self.json({'job':None,'result':None})
    if path.endswith('/entries'):return self.json([])
    if not path.endswith('/list-stream'):self.send_error(404);return
    cfg['requests']+=1;mode=cfg['mode']
@@ -34,7 +35,7 @@ for prefix in ['', '/alist']:
     if not gate.wait(10):return
     if mode=='error':send({'event':'error','message':'fixture 第二批失败'});return
     if mode=='truncate':return
-    send({'event':'batch','content':[{'name':'最后一份文件.pdf','is_dir':False,'size':200,'size_known':True}]});send({'event':'done','total':3})
+    send({'event':'batch','content':[{'name':'AAA新文件.pdf','is_dir':False,'size':200,'size_known':True}]});send({'event':'done','total':3})
    except (BrokenPipeError,ConnectionResetError):pass
  server=ThreadingHTTPServer(('127.0.0.1',0),Handler);thread=Thread(target=server.serve_forever,daemon=True);thread.start()
  with sync_playwright() as p:
@@ -47,7 +48,14 @@ for prefix in ['', '/alist']:
   assert first.is_set() and not gate.is_set()
   expect(page.locator('#source-loading')).to_contain_text('正在加载')
   expect(page.locator('#select-page')).to_be_disabled();expect(page.locator('#download')).to_be_disabled()
-  gate.set();expect(page.locator('#source-count')).to_have_text('共 3 项 · 已选 0 项')
+  expect(page.locator('#source-meter')).not_to_have_attribute('value','100')
+  page.get_by_role('checkbox',name='选择 第一份文件.mp4',exact=True).check()
+  before=page.locator('#source-files tr').all_text_contents()
+  gate.set();expect(page.locator('#source-count')).to_have_text('共 3 项 · 已选 1 项')
+  assert page.locator('#source-files tr').all_text_contents()[:2]==before
+  expect(page.get_by_role('checkbox',name='选择 第一份文件.mp4',exact=True)).to_be_checked()
+  expect(page.locator('#source-files tr').last).to_contain_text('AAA新文件.pdf')
+  expect(page.locator('#source-meter')).to_have_attribute('value','100')
   expect(page.locator('#source-files input')).to_have_count(3)
   page.get_by_role('checkbox',name='选择 第一份文件.mp4',exact=True).check();expect(page.locator('#download')).to_be_enabled()
   for mode in ['error','truncate']:
