@@ -1,0 +1,55 @@
+name: Roll back v20 release to v19
+on:
+  push:
+    branches: [release-rollback-v20]
+permissions:
+  contents: write
+  packages: write
+concurrency:
+  group: bitqiu-amd64-refs/heads/main
+  cancel-in-progress: false
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Authenticate registries
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          printf '%s' "$DOCKERHUB_TOKEN" | docker login docker.io -u "$DOCKERHUB_USERNAME" --password-stdin
+      - name: Restore original v19 image to both latest tags
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          set -euo pipefail
+          original='ghcr.io/fv4004/alist_bitqiu@sha256:5babe04d334f9a972c6ec020fae1aa8fc45a42489bbe494174a6880321f18ca1'
+          docker pull --platform linux/amd64 "$original"
+          docker run --rm --network none --entrypoint /opt/alist/alist "$original" version | tee original-version.txt
+          grep -F 'Version: v3.65.0-bitqiu.19' original-version.txt
+          grep -F 'Commit ID: f621fc5b0e86' original-version.txt
+          docker tag "$original" ghcr.io/fv4004/alist_bitqiu:latest
+          docker tag "$original" "$DOCKERHUB_USERNAME/alist_bitqiu:latest"
+          docker push ghcr.io/fv4004/alist_bitqiu:latest
+          docker push "$DOCKERHUB_USERNAME/alist_bitqiu:latest"
+          docker manifest inspect "$original" > original-manifest.json
+          docker manifest inspect ghcr.io/fv4004/alist_bitqiu:latest > ghcr-latest-manifest.json
+          docker manifest inspect "$DOCKERHUB_USERNAME/alist_bitqiu:latest" > dockerhub-latest-manifest.json
+          cmp original-manifest.json ghcr-latest-manifest.json
+          cmp original-manifest.json dockerhub-latest-manifest.json
+          echo 'VERIFIED: both latest tags match the original v19 manifest.'
+      - name: Withdraw v20 GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --method PATCH repos/FV4004/Alist_bitqiu/releases/418062314 -F draft=true -f make_latest=false --silent
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rollback-v19-verification
+          path: |
+            original-version.txt
+            *-manifest.json
+          retention-days: 30
