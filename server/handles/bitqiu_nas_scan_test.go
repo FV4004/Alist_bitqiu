@@ -11,6 +11,7 @@ import (
 
 	"github.com/alist-org/alist/v3/internal/model"
 	"github.com/alist-org/alist/v3/internal/op"
+	"github.com/alist-org/alist/v3/server/middlewares"
 	"github.com/gin-gonic/gin"
 )
 
@@ -171,7 +172,13 @@ func testNASBackgroundScan(t *testing.T, source, dest string, invoke func(gin.Ha
 		t.Fatal("cache crossed scope")
 	}
 	for _, handler := range []gin.HandlerFunc{BitQiuNASScanStart, BitQiuNASScanStatus, BitQiuNASScanCancel} {
-		if code(invoke(handler, request, false)) != 403 {
+		protected := func(c *gin.Context) {
+			middlewares.AuthAdmin(c)
+			if !c.IsAborted() {
+				handler(c)
+			}
+		}
+		if code(invoke(protected, request, false)) != 403 {
 			t.Fatal("scan endpoint lacks admin restriction")
 		}
 	}

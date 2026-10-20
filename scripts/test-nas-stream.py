@@ -51,8 +51,10 @@ for prefix in ['', '/alist']:
   expect(page.locator('#source-meter')).not_to_have_attribute('value','100')
   page.get_by_role('checkbox',name='选择 第一份文件.mp4',exact=True).check()
   before=page.locator('#source-files tr').all_text_contents()
+  assert page.get_by_role('checkbox',name='选择 第一份文件.mp4',exact=True).evaluate('e=>e===document.activeElement')
   gate.set();expect(page.locator('#source-count')).to_have_text('共 3 项 · 已选 1 项')
   assert page.locator('#source-files tr').all_text_contents()[:2]==before
+  assert page.get_by_role('checkbox',name='选择 第一份文件.mp4',exact=True).evaluate('e=>e===document.activeElement')
   expect(page.get_by_role('checkbox',name='选择 第一份文件.mp4',exact=True)).to_be_checked()
   expect(page.locator('#source-files tr').last).to_contain_text('AAA新文件.pdf')
   expect(page.locator('#source-meter')).to_have_attribute('value','100')

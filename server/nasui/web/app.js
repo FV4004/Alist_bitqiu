@@ -96,9 +96,10 @@
   function clearSelection(){state.selectionEpoch++;state.selected.clear();state.selectedMeta.clear();selectionKey='';selectedUI();}
   function choose(file,on){if(on){state.selected.add(file.name);state.selectedMeta.set(file.name,file);}else{state.selected.delete(file.name);state.selectedMeta.delete(file.name);}}
   function selectionSummary(){
-    const key=JSON.stringify([state.source,...state.selected]);if(key===selectionKey)return;selectionKey=key;const seq=++statsSeq;clearTimeout(statsTimer);statsController?.abort();
+    const key=JSON.stringify([state.source,state.sourceComplete,...state.selected]);if(key===selectionKey)return;selectionKey=key;const seq=++statsSeq;clearTimeout(statsTimer);statsController?.abort();
     const files=[...state.selected].map(name=>state.selectedMeta.get(name));$('selection-count').textContent=`已选择：${files.length} 项`;
     if(files.some(file=>file?.is_dir)){
+      if(state.loading){$('selection-total').textContent='本次下载总大小：目录加载完成后统计所选文件夹';return;}
       $('selection-total').textContent='本次下载总大小：正在递归统计文件夹…';
       statsTimer=setTimeout(async()=>{statsController=new AbortController();try{const stats=await api('/admin/bitqiu/nas/stats',{src_dir:state.source,names:[...state.selected]},statsController.signal);if(seq!==statsSeq)return;$('selection-count').textContent=`已选择：${state.selected.size} 项（包含 ${stats.file_count} 个文件）`;showTotal(stats.known_bytes,stats.unknown_count);}catch(error){if(seq===statsSeq&&error.name!=='AbortError')$('selection-total').textContent='总大小暂不可用：统计失败，'+error.message;}},250);
     }else{let known=0,unknown=0;for(const file of files){if(file?.size_known===true&&Number.isFinite(file.size)&&file.size>=0)known+=file.size;else unknown++;}showTotal(known,unknown);}
@@ -115,10 +116,13 @@
   }
   function renderSource(){
     const items=state.sourceAppendOrder?sourceVisible():sortItems(sourceVisible(),...sortSpec('source'));
-    const fragment=document.createDocumentFragment(),scroll=$('source-files').closest('.table-scroll'),top=scroll.scrollTop;
-    for(const file of items){let row=state.sourceRows.get(file.name);if(!row){row=sourceRow(file);state.sourceRows.set(file.name,row);}fragment.append(row);}
-    if(!items.length){const row=el('tr'),cell=el('td',hasFilter('source')?'没有匹配项，请调整搜索或分类筛选。':state.loading?'正在读取目录，内容将逐批显示…':state.sourceComplete?'此目录为空':'目录未加载完成，请刷新重试','empty');cell.colSpan=2;row.append(cell);fragment.append(row);}
-    $('source-files').replaceChildren(fragment);scroll.scrollTop=top;selectedUI();
+    const tbody=$('source-files'),scroll=tbody.closest('.table-scroll'),top=scroll.scrollTop,focused=document.activeElement,hadFocus=tbody.contains(focused);
+    // Keep existing rows attached when new batches append; do not disturb a pending click/focus.
+    let index=0;
+    for(const file of items){let row=state.sourceRows.get(file.name);if(!row){row=sourceRow(file);state.sourceRows.set(file.name,row);}if(tbody.children[index]!==row)tbody.insertBefore(row,tbody.children[index]||null);index++;}
+    while(tbody.children.length>index)tbody.lastElementChild.remove();
+    if(!items.length){const row=el('tr'),cell=el('td',hasFilter('source')?'没有匹配项，请调整搜索或分类筛选。':state.loading?'正在读取目录，内容将逐批显示…':state.sourceComplete?'此目录为空':'目录未加载完成，请刷新重试','empty');cell.colSpan=2;row.append(cell);tbody.append(row);}
+    scroll.scrollTop=top;if(hadFocus&&focused.isConnected&&document.activeElement!==focused)focused.focus({preventScroll:true});selectedUI();
   }
   function sourceMeter(done){$('source-meter').hidden=false;if(done)$('source-meter').value=100;else $('source-meter').removeAttribute('value');$('source-resort').disabled=!done;}
   async function loadSource(refresh=false){
@@ -229,7 +233,7 @@
   const updateSearch=()=>{state.filter.query=$('picker-search').value;applyFilters();};
   $('picker-search').oninput=event=>{if(!event.isComposing)updateSearch();};$('picker-search').oncompositionend=updateSearch;
   $('picker-search-clear').onclick=()=>{$('picker-search').value='';updateSearch();$('picker-search').focus();};
-  for(const [kind,key]of [['search','searchScopes'],['type','typeScopes'],['sort','sortScopes']])for(const side of ['source','target'])$(kind+'-'+side).onchange=()=>{if($(kind+'-'+side).checked)state.filter[key].add(side);else state.filter[key].delete(side);if(kind==='sort')manualSort();else applyFilters();};
+  for(const [kind,key]of [['search','searchScopes'],['type','typeScopes'],['sort','sortScopes']])for(const side of ['source','target'])$(kind+'-'+side).onchange=()=>{if($(kind+'-'+side).checked)state.filter[key].add(side);else state.filter[key].delete(side);if(kind==='sort'&&side==='source')manualSort(true);else applyFilters();};
   applyFilters();
   $('home').href=base+'/';
   $('source-storage').onchange=run(()=>navigate('source',$('source-storage').value,$('source-storage').value));
@@ -238,9 +242,9 @@
   $('target-up').onclick=run(()=>navigate('target',parent(state.target,state.targetRoot)));
   $('target-refresh').onclick=run(()=>loadTarget(true));
   $('source-refresh').onclick=run(()=>{state.selected.clear();state.selectedMeta.clear();return loadSource(true);});
-  function manualSort(){if(state.loading){state.items=sortItems(state.items,...sortSpec('source'));state.sourceAppendOrder=true;}else state.sourceAppendOrder=false;applyFilters();}
+  function manualSort(force=false){if(!force&&!state.filter.sortScopes.has('source')){applyFilters();return;}if(state.loading){state.items=sortItems(state.items,...sortSpec('source'));state.sourceAppendOrder=true;}else state.sourceAppendOrder=false;applyFilters();}
   $('sort-order').onchange=()=>{[state.orderBy,state.orderDirection]=$('sort-order').value.split(':');manualSort();};
-  $('source-resort').onclick=manualSort;
+  $('source-resort').onclick=()=>manualSort(true);
   $('folders-first').onchange=()=>{state.foldersFirst=$('folders-first').checked;manualSort();};
   $('select-page').onchange=run(()=>{if(!state.sourceComplete||state.loading)return;const visible=sourceVisible();if(visible.length>50000)throw Error('结果超过 50000 项，请缩小搜索范围或分批选择。');for(const file of visible)choose(file,$('select-page').checked);selectedUI();});
   $('clear-selection').onclick=clearSelection;
@@ -324,5 +328,5 @@
   $('compare-final-more').onclick=()=>{comparison.finalLimit+=200;renderFinalComparison();};$('compare-back').onclick=()=>$('compare-confirm').close();
   $('compare-confirm-check').onchange=()=>{$('compare-submit').disabled=!$('compare-confirm-check').checked||!comparison.plan?.tasks.length||comparison.busy;};
   $('compare-submit').onclick=run(async()=>{if(comparison.busy||!$('compare-confirm-check').checked||!comparison.plan?.tasks.length)return;comparison.busy=true;$('compare-submit').disabled=true;$('compare-back').disabled=true;try{const result=await api('/admin/bitqiu/nas/scan/commit',{plan_id:comparison.plan.plan_id,confirmed:true});$('compare-confirm').close();comparison.plan=null;comparison.selected.clear();comparison.scanID='';$('compare-results').hidden=true;targetCache.clear();state.targetReady=false;$('compare-progress').textContent=`已提交 ${result.queued} 项，确认时跳过 ${(result.skipped||[]).length} 项。再次补缺请重新扫描。`;notice($('compare-progress').textContent);await loadTasks();}finally{comparison.busy=false;$('compare-back').disabled=false;$('compare-submit').disabled=!comparison.plan?.tasks.length||!$('compare-confirm-check').checked;compareSelection();}});
-  run(async()=>{await restoreLogin();await targets();await refreshScan(true);setInterval(()=>{if(comparison.running&&comparison.jobID)refreshScan().catch(e=>{$('compare-progress').textContent='扫描状态暂时无法读取，后台任务继续；将自动重试。';});},1500);setInterval(()=>{if(!document.hidden)loadTasks().catch(()=>{});},4000);})();
+  run(async()=>{await restoreLogin();await Promise.all([targets(),refreshScan(true)]);setInterval(()=>{if(comparison.running&&comparison.jobID)refreshScan().catch(e=>{$('compare-progress').textContent='扫描状态暂时无法读取，后台任务继续；将自动重试。';});},1500);setInterval(()=>{if(!document.hidden)loadTasks().catch(()=>{});},4000);})();
 })();
