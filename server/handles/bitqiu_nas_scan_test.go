@@ -3,6 +3,7 @@ package handles
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,7 +76,13 @@ func testNASBackgroundScan(t *testing.T, source, dest string, invoke func(gin.Ha
 		}
 		return objs, nil
 	}
-	first := decode(invoke(BitQiuNASScanStart, request, true))
+	detachedStart := func(c *gin.Context) {
+		ctx, cancel := context.WithCancel(c.Request.Context())
+		c.Request = c.Request.WithContext(ctx)
+		BitQiuNASScanStart(c)
+		cancel()
+	}
+	first := decode(invoke(detachedStart, request, true))
 	if first.Job == nil || first.Job.ID == "" {
 		t.Fatal(first)
 	}
@@ -167,6 +174,14 @@ func testNASBackgroundScan(t *testing.T, source, dest string, invoke func(gin.Ha
 		t.Fatal("cancel discarded cache", canceled)
 	}
 	close(gate)
+	fixture.streamHook = func(ctx context.Context, objs []model.Obj, args model.ListArgs) ([]model.Obj, error) {
+		return nil, errors.New("fixture inaccessible directory")
+	}
+	third := decode(invoke(BitQiuNASScanStart, request, true))
+	partial := wait(third.Job.ID)
+	if partial.Job.State != "partial" || partial.Job.Percent == 100 || partial.Result == nil || partial.Result.ID != first.Job.ID {
+		t.Fatal("partial scan replaced full cache or claimed 100%", partial)
+	}
 	different := decode(invoke(BitQiuNASScanStatus, map[string]any{"src_dir": "/cloud/scan-fixture", "dst_dir": "/nas/scan-fixture", "names": []string{"single.bin"}}, true))
 	if different.Job != nil || different.Result != nil {
 		t.Fatal("cache crossed scope")

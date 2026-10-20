@@ -327,17 +327,23 @@ func scanNASComparison(ctx context.Context, s *nasComparison, actual string, tar
 	if err := walk(actual, "", 0, false, nil); err != nil {
 		return err
 	}
-	for i := range s.items {
-		if !s.items[i].IsDir {
+	blocked := map[string]bool{}
+	allBlocked := false
+	for _, issue := range s.issues {
+		if issue.Relative == "" {
+			allBlocked = true
 			continue
 		}
-		for _, p := range s.issues {
-			if p.Relative == "" || p.Relative == s.items[i].Relative || strings.HasPrefix(p.Relative, s.items[i].Relative+"/") {
-				s.items[i].Blocked = true
-				break
-			}
+		for rel := issue.Relative; rel != "." && rel != "/"; rel = path.Dir(rel) {
+			blocked[rel] = true
 		}
 	}
+	for i := range s.items {
+		if s.items[i].IsDir && (allBlocked || blocked[s.items[i].Relative]) {
+			s.items[i].Blocked = true
+		}
+	}
+
 	return nil
 }
 func BitQiuNASCompare(c *gin.Context) {
@@ -501,6 +507,10 @@ func BitQiuNASComparePrepare(c *gin.Context) {
 		common.ErrorStrResp(c, "目标存储或权限已变化，请重新扫描", 409)
 		return
 	}
+	selectedPaths := map[string]nasCompareItem{}
+	for _, v := range selected {
+		selectedPaths[v.Relative] = v
+	}
 	records := []fs.NASRecord{}
 	skipped := []nasCompareSkip{}
 	occupied := compareOccupied()
@@ -511,8 +521,8 @@ func BitQiuNASComparePrepare(c *gin.Context) {
 		direct := false
 		_, direct = selected[v.ID]
 		include, reviewAllowed := direct, direct
-		for _, parent := range selected {
-			if parent.IsDir && strings.HasPrefix(v.Relative, parent.Relative+"/") {
+		for rel := path.Dir(v.Relative); rel != "." && rel != "/"; rel = path.Dir(rel) {
+			if parent, ok := selectedPaths[rel]; ok && parent.IsDir {
 				include = true
 				if parent.Category == "review" {
 					reviewAllowed = true
