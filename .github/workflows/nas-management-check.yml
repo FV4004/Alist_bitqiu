@@ -34,13 +34,15 @@ jobs:
         run: |
           python -m pip install playwright==1.62.0
           python -m playwright install --with-deps chromium webkit
-          python scripts/test-downloads-mount.py
-          python scripts/test-alist-login.py
-          python scripts/test-nas-browser.py
-          python scripts/test-nas-stream.py
-          python scripts/test-nas-auth.py
-          python scripts/test-nas-picker.py
-          python scripts/test-nas-compare.py
+          browser_test_status=0
+          python scripts/test-downloads-mount.py || browser_test_status=1
+          python scripts/test-alist-login.py || browser_test_status=1
+          python scripts/test-nas-browser.py || browser_test_status=1
+          python scripts/test-nas-stream.py || browser_test_status=1
+          python scripts/test-nas-auth.py || browser_test_status=1
+          python scripts/test-nas-picker.py || browser_test_status=1
+          python scripts/test-nas-compare.py || browser_test_status=1
+          exit "$browser_test_status"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
