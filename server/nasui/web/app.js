@@ -11,6 +11,7 @@
   state.leaves=[];state.expanded=new Set();state.sourceComplete=false;state.sourceRows=new Map();state.sourceController=null;state.targetItems=[];
   const categories=[['folder','文件夹'],['video','视频'],['audio','音频'],['image','图片'],['document','文档'],['archive','压缩包'],['code','代码'],['file','其他']];
   state.filter={query:'',types:new Set(categories.map(x=>x[0])),searchScopes:new Set(['source','target']),typeScopes:new Set(['source','target'])};
+  let lastFilterKeys=null;
   const {matches,DirectoryCache}=window.NASPicker;
   const sourceCache=new DirectoryCache(),targetCache=new DirectoryCache();
   state.targetReady=false;
@@ -220,7 +221,8 @@
     for(const [kind,key]of [['search','searchScopes'],['type','typeScopes']]){
       const scopes=state.filter[key];$(''+kind+'-scope-status').textContent=scopes.size===0?'未应用':scopes.size===2?'已应用于两侧':'仅应用于'+(scopes.has('source')?'网盘':'NAS');
     }
-    renderSource();renderTarget();$('source-files').closest('.table-scroll').scrollTop=0;$('target-folders').scrollTop=0;
+    const keys={source:filterKey('source'),target:filterKey('target')},sourceTop=$('source-files').closest('.table-scroll').scrollTop,targetTop=$('target-folders').scrollTop;
+    renderSource();renderTarget();$('source-files').closest('.table-scroll').scrollTop=lastFilterKeys?.source===keys.source?sourceTop:0;$('target-folders').scrollTop=lastFilterKeys?.target===keys.target?targetTop:0;lastFilterKeys=keys;
   }
   const updateSearch=()=>{state.filter.query=$('picker-search').value;applyFilters();};
   $('picker-search').oninput=event=>{if(!event.isComposing)updateSearch();};$('picker-search').oncompositionend=updateSearch;

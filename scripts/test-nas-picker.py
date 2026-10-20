@@ -106,6 +106,9 @@ with sync_playwright() as p:
    page.go_back();expect(page.locator('#source-path')).to_have_text('/cloud/file-电视剧');expect(page.locator('#source-files input')).to_have_count(0)
    page.go_forward();expect(page.locator('#source-path')).to_have_text('/cloud');expect(page.locator('#source-files input')).to_have_count(10)
    assert calls==before,calls
+   page.locator('#source-files').evaluate("e=>e.closest('.table-scroll').scrollTop=120")
+   page.locator('#search-target').check();assert page.locator('#source-files').evaluate("e=>e.closest('.table-scroll').scrollTop")==120
+   page.locator('#search-target').uncheck();assert page.locator('#source-files').evaluate("e=>e.closest('.table-scroll').scrollTop")==120
    assert page.locator('input[type=search]').count()==1
    assert page.locator('.source input[type=search],.destination input[type=search]').count()==0
    page.locator('#search-source').check();page.locator('#search-target').check();page.locator('#type-source').check();page.locator('#type-target').check()
