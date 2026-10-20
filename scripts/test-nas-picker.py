@@ -25,7 +25,7 @@ with sync_playwright() as p:
      if path.endswith('/targets'):return reply(r,{'cloud':[{'path':'/cloud','label':'cloud'}],'targets':[{'path':'/NAS下载','label':'NAS'}],'downloads_enabled':True})
      if path.endswith('/list-stream'):
       calls['source:'+body['path']]+=1
-      content=files if body['path']=='/cloud' else [{'name':'子目录.txt','is_dir':False,'size':1,'size_known':True}]
+      content=files if body['path']=='/cloud' else [{'name':'file-子目录.txt','is_dir':False,'size':1,'size_known':True}]
       frames=[{'event':'start'},{'event':'batch','content':content}]
       if cfg['fail_child'] and body['path']!='/cloud':frames.append({'event':'error','message':'fixture incomplete directory'})
       else:frames.append({'event':'done','total':len(content)})
@@ -47,38 +47,40 @@ with sync_playwright() as p:
     r.fulfill(content_type={'.html':'text/html','.js':'application/javascript','.css':'text/css'}[f.suffix],body=f.read_bytes())
    context.route('https://nas.example/**',route);page.goto('https://nas.example'+prefix+'/@nas')
    expect(page.locator('#source-files input')).to_have_count(52);expect(page.locator('#select-page')).to_be_enabled()
-   page.locator('#source-search').fill('报26pdf');expect(page.locator('#source-files input')).to_have_count(1)
+   page.locator('#search-target').uncheck()
+   page.locator('#picker-search').fill('报26pdf');expect(page.locator('#source-files input')).to_have_count(1)
    page.locator('#select-page').check();expect(page.locator('#selection-count')).to_have_text('已选择：1 项')
-   page.locator('#source-search-clear').click();expect(page.locator('#source-files input')).to_have_count(52)
-   page.locator('#source-search').fill('file');page.get_by_role('checkbox',name='选择 file-001.txt',exact=True).check()
+   page.locator('#picker-search-clear').click();expect(page.locator('#source-files input')).to_have_count(52)
+   page.locator('#picker-search').fill('file');page.get_by_role('checkbox',name='选择 file-001.txt',exact=True).check()
    expect(page.locator('#source-count')).to_contain_text('筛选外 1 项');page.locator('#sort-order').select_option('name:asc')
    page.locator('#source-files').evaluate("e=>e.closest('.table-scroll').scrollTop=120")
    folder=page.get_by_role('button',name='file-电视剧',exact=True)
    folder.evaluate('e=>e.click()');expect(page.locator('#source-path')).to_have_text('/cloud/file-电视剧');expect(page.locator('#select-page')).to_be_enabled()
-   expect(page.locator('#source-search')).to_have_value('');page.locator('#source-up').click()
-   expect(page.locator('#source-search')).to_have_value('file');expect(page.locator('#sort-order')).to_have_value('name:asc')
+   expect(page.locator('#picker-search')).to_have_value('file');page.locator('#source-up').click()
+   expect(page.locator('#picker-search')).to_have_value('file');expect(page.locator('#sort-order')).to_have_value('name:asc')
    expect(page.locator('#source-count')).to_contain_text('已选 2 项');assert page.locator('#source-files').evaluate("e=>e.closest('.table-scroll').scrollTop")==120
    assert calls['source:/cloud']==1 and calls['source:/cloud/file-电视剧']==1,calls
    page.go_back();expect(page.locator('#source-path')).to_have_text('/cloud/file-电视剧')
-   page.go_back();expect(page.locator('#source-path')).to_have_text('/cloud');expect(page.locator('#source-search')).to_have_value('file')
+   page.go_back();expect(page.locator('#source-path')).to_have_text('/cloud');expect(page.locator('#picker-search')).to_have_value('file')
    assert calls['source:/cloud']==1 and calls['source:/cloud/file-电视剧']==1,calls
    page.go_forward();expect(page.locator('#source-path')).to_have_text('/cloud/file-电视剧')
    cfg['fail_child']=True;page.locator('#source-refresh').click();expect(page.locator('#error-message')).to_contain_text('incomplete directory');page.locator('#error-close').click()
    page.locator('#source-up').click();cfg['fail_child']=False
    folder.evaluate('e=>e.click()');expect(page.locator('#select-page')).to_be_enabled();assert calls['source:/cloud/file-电视剧']==3,calls
    page.locator('#source-up').click();page.locator('#source-refresh').click();expect(page.locator('#select-page')).to_be_enabled()
-   assert calls['source:/cloud']==2,calls;expect(page.locator('#source-search')).to_have_value('file')
-   # Search and type filtering compose, and files remain disabled.
-   page.locator('#target-search').fill('电剧');expect(page.locator('#target-folders button')).to_have_count(2)
+   assert calls['source:/cloud']==2,calls;expect(page.locator('#picker-search')).to_have_value('file')
+   # Shared search and classification scopes are independent; files stay disabled.
+   page.locator('#search-source').uncheck();page.locator('#search-target').check();page.locator('#type-source').uncheck()
+   page.locator('#picker-search').fill('电剧');expect(page.locator('#target-folders button')).to_have_count(2)
    expect(page.get_by_role('button',name='不可选择文件 电视剧预告.mp4',exact=True)).to_be_disabled()
    page.locator('#target-filter-summary').click()
    for check in page.locator('#target-filter-options input').all():check.uncheck()
    page.locator('#target-filter-options').get_by_role('checkbox',name='文件夹',exact=True).check();page.locator('#target-filter-summary').click()
    expect(page.locator('#target-folders button')).to_have_count(1)
    page.get_by_role('button',name='打开 NAS 文件夹 电视剧2026',exact=True).click();expect(page.locator('#target-path')).to_have_text('/NAS下载/电视剧2026')
-   page.locator('#target-up').click();expect(page.locator('#target-search')).to_have_value('电剧');expect(page.locator('#target-count')).to_have_text('显示 1 / 32 项')
+   page.locator('#target-up').click();expect(page.locator('#picker-search')).to_have_value('电剧');expect(page.locator('#target-count')).to_have_text('显示 1 / 32 项')
    assert calls['target:/NAS下载']==1,calls
-   page.locator('#target-filter-summary').click();page.locator('#target-filter-reset').click();page.locator('#target-filter-summary').click();page.locator('#target-search-clear').click()
+   page.locator('#target-filter-summary').click();page.locator('#target-filter-reset').click();page.locator('#target-filter-summary').click();page.locator('#picker-search-clear').click()
    page.locator('#target-folders').evaluate('e=>e.scrollTop=150')
    page.get_by_role('button',name='打开 NAS 文件夹 目录00',exact=True).evaluate('e=>e.click()');expect(page.locator('#target-path')).to_have_text('/NAS下载/目录00')
    page.locator('#target-up').click();assert page.locator('#target-folders').evaluate('e=>e.scrollTop')==150
@@ -94,7 +96,54 @@ with sync_playwright() as p:
    page.get_by_role('button',name='打开 NAS 文件夹 目录00',exact=True).evaluate('e=>e.click()');expect(page.locator('#target-path')).to_have_text('/NAS下载/目录00')
    page.locator('#target-up').click();expect(page.get_by_role('button',name='打开 NAS 文件夹 任务新目录',exact=True)).to_be_visible();assert calls['target:/NAS下载']==4,calls
    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'),engine.name
+   # Filters are global: cached directories must use the current toolbar state.
+   before=calls.copy()
+   page.locator('#search-source').check();page.locator('#search-target').uncheck()
+   folder.evaluate('e=>e.click()');expect(page.locator('#source-path')).to_have_text('/cloud/file-电视剧')
+   page.locator('#picker-search').fill('file-0');expect(page.locator('#source-files input')).to_have_count(0)
+   page.locator('#source-up').click();expect(page.locator('#source-files input')).to_have_count(50)
+   expect(page.locator('#picker-search')).to_have_value('file-0');assert page.locator('#source-files').evaluate("e=>e.closest('.table-scroll').scrollTop")==0
+   page.go_back();expect(page.locator('#source-path')).to_have_text('/cloud/file-电视剧');expect(page.locator('#source-files input')).to_have_count(0)
+   page.go_forward();expect(page.locator('#source-path')).to_have_text('/cloud');expect(page.locator('#source-files input')).to_have_count(50)
+   assert calls==before,calls
+   page.locator('#source-files').evaluate("e=>e.closest('.table-scroll').scrollTop=120")
+   page.locator('#search-target').check();assert page.locator('#source-files').evaluate("e=>e.closest('.table-scroll').scrollTop")==120
+   page.locator('#search-target').uncheck();assert page.locator('#source-files').evaluate("e=>e.closest('.table-scroll').scrollTop")==120
+   assert page.locator('input[type=search]').count()==1
+   assert page.locator('.source input[type=search],.destination input[type=search]').count()==0
+   page.locator('#search-source').check();page.locator('#search-target').check();page.locator('#type-source').check();page.locator('#type-target').check()
+   page.locator('#picker-search').fill('电剧');expect(page.locator('#source-files input')).to_have_count(1);expect(page.locator('#target-folders button')).to_have_count(2)
+   page.locator('#search-source').uncheck();expect(page.locator('#source-files input')).to_have_count(52);expect(page.locator('#target-folders button')).to_have_count(2)
+   page.locator('#search-target').uncheck();expect(page.locator('#target-folders button')).to_have_count(34);expect(page.locator('#search-scope-status')).to_have_text('未应用')
+   expect(page.locator('#picker-search')).to_have_value('电剧')
+   page.locator('#search-source').check();expect(page.locator('#source-files input')).to_have_count(1);expect(page.locator('#target-folders button')).to_have_count(34)
+   page.locator('#search-target').check();expect(page.locator('#target-folders button')).to_have_count(2)
+   page.locator('#target-filter-summary').click()
+   for check in page.locator('#target-filter-options input').all():check.uncheck()
+   expect(page.locator('#source-files input')).to_have_count(0);expect(page.locator('#target-folders button')).to_have_count(0)
+   page.locator('#target-filter-options').get_by_role('checkbox',name='视频',exact=True).check();page.locator('#target-filter-summary').click()
+   expect(page.locator('#source-files input')).to_have_count(0);expect(page.locator('#target-folders button')).to_have_count(1)
+   expect(page.get_by_role('button',name='不可选择文件 电视剧预告.mp4',exact=True)).to_be_disabled()
+   page.locator('#search-source').uncheck();page.locator('#search-target').uncheck()
+   page.locator('#type-source').uncheck();expect(page.locator('#source-files input')).to_have_count(52);expect(page.locator('#target-folders button')).to_have_count(1)
+   page.locator('#type-target').uncheck();expect(page.locator('#target-folders button')).to_have_count(34);expect(page.locator('#type-scope-status')).to_have_text('未应用')
+   expect(page.locator('#target-filter-options input:checked')).to_have_count(1)
+   page.locator('#type-source').check();expect(page.locator('#source-files input')).to_have_count(0);expect(page.locator('#target-folders button')).to_have_count(34)
+   page.locator('#type-target').check();expect(page.locator('#target-folders button')).to_have_count(1)
+   page.locator('#target-filter-summary').click();page.locator('#target-filter-reset').click();page.locator('#target-filter-summary').click()
+   expect(page.locator('#source-files input')).to_have_count(52);expect(page.locator('#target-folders button')).to_have_count(34)
+   expect(page.locator('#picker-search')).to_have_value('电剧');expect(page.locator('#search-scope-status')).to_have_text('未应用')
+   page.locator('#picker-search-clear').click();page.locator('#search-source').check();page.locator('#search-target').check()
+   page.get_by_role('checkbox',name='选择 file-001.txt',exact=True).check()
+   page.locator('#target-filter-summary').click()
+   for check in page.locator('#target-filter-options input').all():check.uncheck()
+   page.locator('#target-filter-options').get_by_role('checkbox',name='视频',exact=True).check()
+   expect(page.locator('#source-count')).to_contain_text('筛选外 1 项')
+   page.locator('#target-filter-reset').click();page.locator('#target-filter-summary').click()
+   expect(page.get_by_role('checkbox',name='选择 file-001.txt',exact=True)).to_be_checked()
+   assert calls==before,calls
+   assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'),engine.name
    assert not errors,errors
-   print('PASS NAS picker: fuzzy search, filtered selection, cached up/back/forward, scroll, refresh, incomplete/race safety; '+engine.name+' prefix='+repr(prefix))
+   print('PASS NAS picker: shared search/type scopes, combined filters, hidden selection, current-filter cache/back/forward, scroll, refresh, incomplete/race safety; '+engine.name+' prefix='+repr(prefix))
    context.close()
   browser.close()
