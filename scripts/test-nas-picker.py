@@ -100,11 +100,11 @@ with sync_playwright() as p:
    before=calls.copy()
    page.locator('#search-source').check();page.locator('#search-target').uncheck()
    folder.evaluate('e=>e.click()');expect(page.locator('#source-path')).to_have_text('/cloud/file-电视剧')
-   page.locator('#picker-search').fill('file-00');expect(page.locator('#source-files input')).to_have_count(0)
-   page.locator('#source-up').click();expect(page.locator('#source-files input')).to_have_count(10)
-   expect(page.locator('#picker-search')).to_have_value('file-00');assert page.locator('#source-files').evaluate("e=>e.closest('.table-scroll').scrollTop")==0
+   page.locator('#picker-search').fill('file-0');expect(page.locator('#source-files input')).to_have_count(0)
+   page.locator('#source-up').click();expect(page.locator('#source-files input')).to_have_count(50)
+   expect(page.locator('#picker-search')).to_have_value('file-0');assert page.locator('#source-files').evaluate("e=>e.closest('.table-scroll').scrollTop")==0
    page.go_back();expect(page.locator('#source-path')).to_have_text('/cloud/file-电视剧');expect(page.locator('#source-files input')).to_have_count(0)
-   page.go_forward();expect(page.locator('#source-path')).to_have_text('/cloud');expect(page.locator('#source-files input')).to_have_count(10)
+   page.go_forward();expect(page.locator('#source-path')).to_have_text('/cloud');expect(page.locator('#source-files input')).to_have_count(50)
    assert calls==before,calls
    page.locator('#source-files').evaluate("e=>e.closest('.table-scroll').scrollTop=120")
    page.locator('#search-target').check();assert page.locator('#source-files').evaluate("e=>e.closest('.table-scroll').scrollTop")==120
