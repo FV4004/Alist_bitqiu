@@ -70,7 +70,7 @@ with sync_playwright() as p:
    page.locator('#sort-order').select_option('name:desc');expect(page.locator('#source-files tr').first).to_contain_text('a.txt');expect(page.locator('#target-folders button').first).to_contain_text('A-folder')
    page.locator('#sort-source').check();expect(page.locator('#source-files tr').first).to_contain_text('z.txt')
    page.locator('#sort-target').check();expect(page.locator('#target-folders button').first).to_contain_text('Unknown.txt')
-   page.locator('#folders-first').check();expect(page.locator('#source-files tr').first).to_contain_text('z.txt');expect(page.locator('#target-folders button').first).to_contain_text('A-folder')
+   page.locator('#folders-first').check();expect(page.locator('#source-files tr').first).to_contain_text('folder');expect(page.locator('#target-folders button').first).to_contain_text('A-folder')
    assert count==len([x for x,_ in calls if x.endswith('/entries') or x.endswith('/list-stream')])
    # User-selected range is frozen; filtering doesn't silently remove hidden selections.
    expect(page.locator('#compare-start')).to_be_disabled()
