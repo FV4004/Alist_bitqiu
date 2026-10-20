@@ -12,19 +12,21 @@
   const categories=[['folder','文件夹'],['video','视频'],['audio','音频'],['image','图片'],['document','文档'],['archive','压缩包'],['code','代码'],['file','其他']];
   state.filter={query:'',types:new Set(categories.map(x=>x[0])),searchScopes:new Set(['source','target']),typeScopes:new Set(['source','target'])};
   let lastFilterKeys=null;
-  const {matches,DirectoryCache}=window.NASPicker;
+  const {matches,DirectoryCache,sortItems}=window.NASPicker;
+  state.filter.sortScopes=new Set(['source','target']);state.foldersFirst=true;
+  const sortSpec=side=>state.filter.sortScopes.has(side)?[state.orderBy,state.orderDirection,state.foldersFirst]:side==='source'?['modified','desc',false]:['name','asc',true];
   const sourceCache=new DirectoryCache(),targetCache=new DirectoryCache();
   state.targetReady=false;
   const queryFor=side=>state.filter.searchScopes.has(side)?state.filter.query:'';
   const hasFilter=side=>!!queryFor(side).trim()||(state.filter.typeScopes.has(side)&&state.filter.types.size!==categories.length);
-  const filterKey=side=>JSON.stringify([queryFor(side),state.filter.typeScopes.has(side)?[...state.filter.types].sort():null]);
+  const filterKey=side=>JSON.stringify([queryFor(side),state.filter.typeScopes.has(side)?[...state.filter.types].sort():null,sortSpec(side)]);
   const visible=(file,side)=>matches(file.name,queryFor(side))&&(!state.filter.typeScopes.has(side)||state.filter.types.has(window.NASIcons.type(file.name,file.is_dir)));
   const sourceVisible=()=>state.items.filter(file=>visible(file,'source'));
   function remember(side){
     const source=side==='source',cache=source?sourceCache:targetCache,root=state[side+'Root'],path=state[side];
     if(!path||state[side+'LoadedKey']!==cache.key(root,path)||(source?(!state.sourceComplete||state.loading):!state.targetReady))return;
     const snapshot={items:source?state.items:state.targetItems,filterKey:filterKey(side),scroll:source?$('source-files').closest('.table-scroll').scrollTop:$('target-folders').scrollTop};
-    if(source)Object.assign(snapshot,{selected:new Set(state.selected),meta:new Map(state.selectedMeta),orderBy:state.orderBy,orderDirection:state.orderDirection});
+    if(source)Object.assign(snapshot,{selected:new Set(state.selected),meta:new Map(state.selectedMeta)});
     cache.put(root,path,snapshot);
   }
   function pickerHistory(replace=false){
@@ -112,7 +114,7 @@
     nameCell.append(heading,el('div',`${file.is_dir?'文件夹':file.size_known===false?'大小未知':bytes(file.size)} · 修改于 ${dateText(file.modified)}`,'file-meta'));tr.append(checkCell,nameCell);return tr;
   }
   function renderSource(){
-    const items=sourceVisible();const cmp=(a,b)=>{let delta=0;if(state.orderBy==='modified')delta=(Date.parse(a.modified)||0)-(Date.parse(b.modified)||0);else if(state.orderBy==='size')delta=(a.size||0)-(b.size||0);else delta=a.name.toLowerCase()<b.name.toLowerCase()?-1:a.name.toLowerCase()>b.name.toLowerCase()?1:0;if(delta)return state.orderDirection==='desc'?-delta:delta;return a.name<b.name?-1:a.name>b.name?1:0;};items.sort(cmp);
+    const items=sortItems(sourceVisible(),...sortSpec('source'));
     const fragment=document.createDocumentFragment(),scroll=$('source-files').closest('.table-scroll'),top=scroll.scrollTop;
     for(const file of items){let row=state.sourceRows.get(file.name);if(!row){row=sourceRow(file);state.sourceRows.set(file.name,row);}fragment.append(row);}
     if(!items.length){const row=el('tr'),cell=el('td',hasFilter('source')?'没有匹配项，请调整搜索或分类筛选。':state.loading?'正在读取目录，内容将逐批显示…':state.sourceComplete?'此目录为空':'目录未加载完成，请刷新重试','empty');cell.colSpan=2;row.append(cell);fragment.append(row);}
@@ -123,7 +125,7 @@
     const key=sourceCache.key(state.sourceRoot,state.source);state.sourceLoadedKey=key;
     if(refresh)sourceCache.delete(state.sourceRoot,state.source);
     const saved=refresh?null:sourceCache.get(state.sourceRoot,state.source);
-    if(saved){state.items=saved.items;state.total=saved.items.length;state.sourceRows=new Map();state.sourceComplete=true;state.loading=false;state.selected=new Set(saved.selected);state.selectedMeta=new Map(saved.meta);state.orderBy=saved.orderBy;state.orderDirection=saved.orderDirection;$('sort-order').value=saved.orderBy+':'+saved.orderDirection;$('source-path').textContent=state.source;$('source-up').disabled=state.source===state.sourceRoot;$('source-loading').textContent=`已恢复目录 · ${state.total} 项（每个文件夹仅计 1 项；刷新可获取最新内容）`;renderSource();$('source-files').closest('.table-scroll').scrollTop=saved.filterKey===filterKey('source')?saved.scroll:0;return;}
+    if(saved){state.items=saved.items;state.total=saved.items.length;state.sourceRows=new Map();state.sourceComplete=true;state.loading=false;state.selected=new Set(saved.selected);state.selectedMeta=new Map(saved.meta);$('source-path').textContent=state.source;$('source-up').disabled=state.source===state.sourceRoot;$('source-loading').textContent=`已恢复目录 · ${state.total} 项（每个文件夹仅计 1 项；刷新可获取最新内容）`;renderSource();$('source-files').closest('.table-scroll').scrollTop=saved.filterKey===filterKey('source')?saved.scroll:0;return;}
     $('source-files').closest('.table-scroll').scrollTop=0;
     state.items=[];state.total=0;state.sourceRows=new Map();state.sourceComplete=false;state.loading=!!state.source;$('source-path').textContent=state.source;$('source-up').disabled=!state.source||state.source===state.sourceRoot;
     $('source-loading').textContent=state.source?'正在连接，目录内容将逐批显示…':'请选择 BitQiu 存储';renderSource();if(!state.source)return;
@@ -142,7 +144,7 @@
   }
   function renderTarget(){
     $('target-folders').replaceChildren();const shown=state.targetItems.filter(item=>visible(item,'target'));
-    shown.sort((a,b)=>Number(b.is_dir)-Number(a.is_dir)||a.name.localeCompare(b.name,'zh-CN',{numeric:true}));
+    shown.splice(0,shown.length,...sortItems(shown,...sortSpec('target')));
     for(const item of shown){const button=el('button',undefined,'folder'+(!item.selectable?' unavailable-file':''));button.disabled=!item.selectable;button.setAttribute('aria-label',item.selectable?'打开 NAS 文件夹 '+item.name:'不可选择文件 '+item.name);button.append(icon(item.name,item.is_dir),el('span',item.name),el('span',item.selectable?'›':item.is_dir?'不可选择':item.size_known?bytes(item.size):'文件 · 不可选择'));if(item.selectable)button.onclick=run(()=>navigate('target',join(state.target,item.path)));$('target-folders').append(button);}
     if(!shown.length)$('target-folders').append(el('p',state.targetItems.length?(hasFilter('target')?'没有匹配的名称，请调整搜索或分类筛选。':'当前分类没有内容，请调整筛选或重置为全选。'):'此目录为空，可以直接保存到这里。','empty'));
     $('target-count').textContent=`显示 ${shown.length} / ${state.targetItems.length} 项`;
@@ -218,7 +220,7 @@
   $('target-filter').addEventListener('keydown',event=>{if(event.key==='Escape'){$('target-filter').open=false;$('target-filter-summary').focus();}});
   function applyFilters(){
     $('picker-search-clear').disabled=!state.filter.query;
-    for(const [kind,key]of [['search','searchScopes'],['type','typeScopes']]){
+    for(const [kind,key]of [['search','searchScopes'],['type','typeScopes'],['sort','sortScopes']]){
       const scopes=state.filter[key];$(''+kind+'-scope-status').textContent=scopes.size===0?'未应用':scopes.size===2?'已应用于两侧':'仅应用于'+(scopes.has('source')?'网盘':'NAS');
     }
     const keys={source:filterKey('source'),target:filterKey('target')},sourceTop=$('source-files').closest('.table-scroll').scrollTop,targetTop=$('target-folders').scrollTop;
@@ -227,7 +229,7 @@
   const updateSearch=()=>{state.filter.query=$('picker-search').value;applyFilters();};
   $('picker-search').oninput=event=>{if(!event.isComposing)updateSearch();};$('picker-search').oncompositionend=updateSearch;
   $('picker-search-clear').onclick=()=>{$('picker-search').value='';updateSearch();$('picker-search').focus();};
-  for(const [kind,key]of [['search','searchScopes'],['type','typeScopes']])for(const side of ['source','target'])$(kind+'-'+side).onchange=()=>{if($(kind+'-'+side).checked)state.filter[key].add(side);else state.filter[key].delete(side);applyFilters();};
+  for(const [kind,key]of [['search','searchScopes'],['type','typeScopes'],['sort','sortScopes']])for(const side of ['source','target'])$(kind+'-'+side).onchange=()=>{if($(kind+'-'+side).checked)state.filter[key].add(side);else state.filter[key].delete(side);applyFilters();};
   applyFilters();
   $('home').href=base+'/';
   $('source-storage').onchange=run(()=>navigate('source',$('source-storage').value,$('source-storage').value));
@@ -236,7 +238,8 @@
   $('target-up').onclick=run(()=>navigate('target',parent(state.target,state.targetRoot)));
   $('target-refresh').onclick=run(()=>loadTarget(true));
   $('source-refresh').onclick=run(()=>{state.selected.clear();state.selectedMeta.clear();return loadSource(true);});
-  $('sort-order').onchange=()=>{[state.orderBy,state.orderDirection]=$('sort-order').value.split(':');renderSource();$('source-files').closest('.table-scroll').scrollTop=0;};
+  $('sort-order').onchange=()=>{[state.orderBy,state.orderDirection]=$('sort-order').value.split(':');applyFilters();};
+  $('folders-first').onchange=()=>{state.foldersFirst=$('folders-first').checked;applyFilters();};
   $('select-page').onchange=run(()=>{if(!state.sourceComplete||state.loading)return;const visible=sourceVisible();if(visible.length>50000)throw Error('结果超过 50000 项，请缩小搜索范围或分批选择。');for(const file of visible)choose(file,$('select-page').checked);selectedUI();});
   $('clear-selection').onclick=clearSelection;
   $('enable').onclick=run(async()=>{await api('/admin/bitqiu/nas/enable',{});notice('NAS 目录已启用，可以逐级选择保存位置。');await targets();});
@@ -253,5 +256,47 @@
   $('history-clear-all').onclick=run(()=>clearHistory('all'));
   $('history-clear-selected').onclick=run(()=>clearHistory('selected',state.history.flatMap(taskIDs).filter(id=>state.taskSelected.has(id))));
   $('tasks-refresh').onclick=run(loadTasks);
+  const comparison={items:[],issues:[],selected:new Set(),tab:'files',limit:200,seq:0,running:false,controller:null,scanID:'',plan:null,finalLimit:200,busy:false};
+  function compareRows(){return comparison.items.filter(item=>item.category===comparison.tab);}
+  function compareSelection(){const rows=compareRows().filter(x=>!x.blocked),marked=rows.filter(x=>comparison.selected.has(x.id)).length;$('compare-select-all').checked=rows.length>0&&marked===rows.length;$('compare-select-all').indeterminate=marked>0&&marked<rows.length;$('compare-select-all').disabled=!rows.length;$('compare-selected').textContent=`已选 ${comparison.selected.size} 项（文件夹及其文件将在清单中去重）`;$('compare-prepare').disabled=!comparison.selected.size||comparison.running||comparison.busy;}
+  function renderComparison(){
+    const rows=compareRows();for(const kind of ['files','folders','review']){const button=$('compare-tab-'+kind);button.setAttribute('aria-selected',String(comparison.tab===kind));button.textContent=({files:'缺失文件',folders:'缺失文件夹',review:'待核对缺失项'}[kind])+' '+comparison.items.filter(x=>x.category===kind).length;}
+    const list=$('compare-list');list.replaceChildren();
+    for(const item of rows.slice(0,comparison.limit)){
+      const row=el('div',undefined,'compare-row'),check=el('input');check.type='checkbox';check.checked=comparison.selected.has(item.id);check.disabled=!!item.blocked;check.setAttribute('aria-label','补缺选择 '+item.relative);check.onchange=()=>{if(check.checked)comparison.selected.add(item.id);else comparison.selected.delete(item.id);compareSelection();};
+      const label=el('label',undefined,'check');label.append(check);const content=el('div'),name=el('div',undefined,'file-heading');name.append(icon(item.relative,item.is_dir),el('span',item.relative));content.append(name,el('p',item.is_dir?'创建缺失文件夹及选中的内部缺失项目':item.size>=0?bytes(item.size):'大小未知','hint'));
+      if(item.candidates?.length)content.append(el('p','疑似 NAS 对象：'+item.candidates.join('、')+'；请明确核对后再勾选。','hint'));
+      if(item.blocked)content.append(el('p','此文件夹未完整扫描，禁止整体选择；请查看扫描问题。','task-error'));
+      if(item.is_dir){const details=el('details'),summary=el('summary','查看内部缺失项目');details.append(summary);details.ontoggle=()=>{if(!details.open||details.dataset.ready)return;details.dataset.ready='1';const children=comparison.items.filter(x=>x.relative.startsWith(item.relative+'/'));for(const child of children.slice(0,200))details.append(el('p',child.relative+(child.category==='review'?'（待核对）':''),'hint'));if(children.length>200)details.append(el('p',`此处显示前 200 / ${children.length} 项，全部文件请在相应选项卡复核。`,'hint'));if(!children.length)details.append(el('p','无已确认的内部缺失文件；可能为空文件夹，请同时查看扫描问题。','hint'));};content.append(details);}
+      row.append(label,content);list.append(row);
+    }
+    if(!rows.length)list.append(el('p','当前结果分类无缺失项目。','empty'));
+    $('compare-more').hidden=rows.length<=comparison.limit;compareSelection();
+  }
+  async function scanComparison(){
+    if(comparison.running)return;if(!state.source||!state.target)throw Error('请先选择网盘来源和 NAS 目录。');
+    const source=state.source,destination=state.target,seq=++comparison.seq;comparison.controller?.abort();comparison.controller=new AbortController();comparison.running=true;comparison.items=[];comparison.issues=[];comparison.scanID='';comparison.selected.clear();$('compare-results').hidden=true;$('compare-start').disabled=true;$('compare-cancel').disabled=false;$('compare-progress').textContent='正在扫描…';$('compare-roots').textContent=`网盘：${source} → NAS：${destination}`;
+    let reader,done=false;
+    try{
+      const response=await fetch(base+'/api/admin/bitqiu/nas/compare',{method:'POST',headers:requestHeaders(),body:JSON.stringify({src_dir:source,dst_dir:destination}),signal:comparison.controller.signal});
+      if(!response.ok||!(response.headers.get('content-type')||'').includes('application/x-ndjson')){const value=await response.json();throw Error(apiError(value,response.status));}
+      if(!response.body)throw Error('当前浏览器不支持扫描结果流，请更新浏览器。');reader=response.body.getReader();const decoder=new TextDecoder();let pending='';
+      const frame=line=>{if(!line.trim())return;const data=JSON.parse(line);if(done)throw Error('扫描响应异常，请重新扫描。');if(data.event==='error')throw Error(data.message||'扫描失败');if(data.event==='progress'){$('compare-progress').textContent=`已检查 ${data.visited} 项 · ${data.relative||'根目录'}`;return;}if(data.event!=='done'||!data.scan_id||!Array.isArray(data.items))throw Error('扫描结果不完整');done=true;comparison.scanID=data.scan_id;comparison.items=data.items;comparison.issues=data.issues||[];};
+      for(;;){const part=await reader.read();if(seq!==comparison.seq)return;pending+=part.done?decoder.decode():decoder.decode(part.value,{stream:true});if(pending.length>32*1024*1024)throw Error('扫描结果过大，请缩小目录范围。');let end;while((end=pending.indexOf('\n'))>=0){frame(pending.slice(0,end));pending=pending.slice(end+1);}if(part.done){if(pending.trim())frame(pending);break;}}
+      if(!done)throw Error('扫描连接中断，结果未完成，请重新扫描。');
+      comparison.tab='files';comparison.limit=200;$('compare-issue-count').textContent=String(comparison.issues.length);$('compare-issues').replaceChildren();for(const issue of comparison.issues)$('compare-issues').append(el('p',`${issue.relative||'根目录'}：${issue.message}`,'task-error'));
+      $('compare-results').hidden=false;$('compare-progress').textContent=`扫描完成：${comparison.items.length} 个缺失/待核对项目，${comparison.issues.length} 个扫描问题。`;renderComparison();
+    }catch(error){if(seq!==comparison.seq)return;comparison.scanID='';comparison.items=[];$('compare-results').hidden=true;$('compare-progress').textContent=error.name==='AbortError'?'扫描已取消，未生成可下载结果。':'扫描失败，未生成可下载结果。';if(error.name!=='AbortError')throw error;}
+    finally{if(reader){try{await reader.cancel();}catch{}reader.releaseLock();}if(seq===comparison.seq){comparison.running=false;$('compare-start').disabled=false;$('compare-cancel').disabled=true;compareSelection();}}
+  }
+  function renderFinalComparison(){const plan=comparison.plan;if(!plan)return;$('compare-final-list').replaceChildren();for(const task of plan.tasks.slice(0,comparison.finalLimit)){$('compare-final-list').append(el('p',`${task.relative} · ${task.is_dir?'创建文件夹':task.size>=0?bytes(task.size):'大小未知'}`));}$('compare-final-more').hidden=plan.tasks.length<=comparison.finalLimit;}
+  $('compare-start').onclick=run(scanComparison);$('compare-cancel').onclick=()=>comparison.controller?.abort();
+  for(const kind of ['files','folders','review'])$('compare-tab-'+kind).onclick=()=>{comparison.tab=kind;comparison.limit=200;renderComparison();};
+  $('compare-select-all').onchange=()=>{for(const item of compareRows()){if(item.blocked)continue;if($('compare-select-all').checked)comparison.selected.add(item.id);else comparison.selected.delete(item.id);}renderComparison();};
+  $('compare-clear').onclick=()=>{comparison.selected.clear();renderComparison();};$('compare-more').onclick=()=>{comparison.limit+=200;renderComparison();};
+  $('compare-prepare').onclick=run(async()=>{if(comparison.busy)return;comparison.busy=true;compareSelection();try{const plan=await api('/admin/bitqiu/nas/compare/prepare',{scan_id:comparison.scanID,ids:[...comparison.selected]});comparison.plan=plan;comparison.finalLimit=200;$('compare-confirm-roots').textContent=`网盘：${plan.source} → NAS：${plan.destination}`;$('compare-confirm-summary').textContent=`去重后：${plan.files} 个文件、${plan.directories} 个文件夹；已知大小 ${bytes(plan.known_bytes)}${plan.unknown_count?'，另有 '+plan.unknown_count+' 个文件大小未知':''}。跳过 ${(plan.skipped||[]).length} 项。`;$('compare-skip-count').textContent=String((plan.skipped||[]).length);$('compare-skipped').replaceChildren();for(const item of plan.skipped||[])$('compare-skipped').append(el('p',item.relative+'：'+item.reason,'hint'));$('compare-confirm-check').checked=false;$('compare-submit').disabled=true;renderFinalComparison();$('compare-confirm').showModal();}finally{comparison.busy=false;compareSelection();}});
+  $('compare-final-more').onclick=()=>{comparison.finalLimit+=200;renderFinalComparison();};$('compare-back').onclick=()=>$('compare-confirm').close();
+  $('compare-confirm-check').onchange=()=>{$('compare-submit').disabled=!$('compare-confirm-check').checked||!comparison.plan?.tasks.length||comparison.busy;};
+  $('compare-submit').onclick=run(async()=>{if(comparison.busy||!$('compare-confirm-check').checked||!comparison.plan?.tasks.length)return;comparison.busy=true;$('compare-submit').disabled=true;$('compare-back').disabled=true;try{const result=await api('/admin/bitqiu/nas/compare/commit',{plan_id:comparison.plan.plan_id,confirmed:true});$('compare-confirm').close();comparison.plan=null;comparison.selected.clear();comparison.scanID='';$('compare-results').hidden=true;targetCache.clear();state.targetReady=false;$('compare-progress').textContent=`已提交 ${result.queued} 项，确认时跳过 ${(result.skipped||[]).length} 项。再次补缺请重新扫描。`;notice($('compare-progress').textContent);await loadTasks();}finally{comparison.busy=false;$('compare-back').disabled=false;$('compare-submit').disabled=!comparison.plan?.tasks.length||!$('compare-confirm-check').checked;compareSelection();}});
   run(async()=>{await restoreLogin();await targets();setInterval(()=>{if(!document.hidden)loadTasks().catch(()=>{});},4000);})();
 })();

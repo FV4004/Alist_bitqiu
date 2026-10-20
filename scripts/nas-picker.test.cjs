@@ -18,3 +18,12 @@ test('cache entry budget includes replacement and refuses oversized snapshots',(
  cache.put('/a','/a/g',value(1));assert.equal(cache.count,1);
  cache.put('/a','/a/g',value(5));assert.equal(cache.count,0);assert.equal(cache.get('/a','/a/g'),undefined);
 });
+test('shared sorting keeps unknown sizes last, supports folder priority and explicit directions',()=>{
+ const {sortItems}=require('../server/nasui/web/picker.js');
+ const files=[{name:'folder',is_dir:true,size:0},{name:'large',size:100,size_known:true},{name:'empty',size:0,size_known:true},{name:'unknown',size:0,size_known:false}];
+ assert.deepEqual(sortItems(files,'size','asc',false).map(x=>x.name),['empty','large','folder','unknown']);
+ assert.deepEqual(sortItems(files,'size','desc',false).map(x=>x.name),['large','empty','folder','unknown']);
+ assert.deepEqual(sortItems(files,'size','desc',true).map(x=>x.name),['folder','large','empty','unknown']);
+ assert.equal(sortItems(files,'name','desc',false)[0].name,'unknown');
+ assert.equal(files[0].name,'folder');
+});

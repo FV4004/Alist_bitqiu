@@ -215,3 +215,7 @@ NAS 页统一文件类型 SVG 图标；下载前询问同名文件替换/跳过�
 右侧 NAS 保存目录显示全部对象，普通文件、符号链接等置灰不可选，只有文件夹可进入作为保存位置。路径右侧提供文件夹、视频、音频、图片、文档、压缩包、代码、其他 8 类多选筛选；重置定义为全选分类。筛选只影响右侧显示，不改变当前保存路径或左侧勾选。
 
 原 `/fs/list` 分页 API 和 `/nas/dirs` 仅目录 API 保留兼容；新增管理员 `/nas/list-stream` 与 `/nas/entries`，不改变登录/下载/历史/并发规则或数据库配置。若使用反向代理，需允许流式响应透传，避免代理强制缓冲；服务器已发送 `X-Accel-Buffering: no`。
+
+## 单向补缺测试构建（非生产发布）
+
+`nas-management-compare-preview` 分支增加统一排序和“以网盘为准补齐 NAS 缺失项”的人工复核流程。本次仅在 Actions 保存可导入镜像与二进制，不推送 Docker Hub/GHCR，不更新生产 latest。导入、限制及测试说明见 [NAS_COMPARE_PREVIEW.md](docs/NAS_COMPARE_PREVIEW.md)。

@@ -37,7 +37,18 @@
     }
     clear() { this.entries.clear(); this.count = 0; }
   }
-  const api = { matches, DirectoryCache };
+  function sortItems(items,field='modified',direction='desc',foldersFirst=true){
+    const value=file=>field==='modified'?Date.parse(file.modified):file.is_dir||file.size_known===false?NaN:Number(file.size);
+    return [...items].sort((a,b)=>{
+      if(foldersFirst&&!!a.is_dir!==!!b.is_dir)return a.is_dir?-1:1;
+      let delta=0;
+      if(field==='name')delta=a.name.localeCompare(b.name,'zh-CN',{numeric:true,sensitivity:'base'});
+      else{const av=value(a),bv=value(b),ak=Number.isFinite(av)&&!(field==='size'&&av<0),bk=Number.isFinite(bv)&&!(field==='size'&&bv<0);if(ak!==bk)return ak?-1:1;if(ak)delta=av-bv;}
+      if(delta)return direction==='desc'?-delta:delta;
+      return a.name.localeCompare(b.name,'zh-CN',{numeric:true});
+    });
+  }
+  const api = { matches, DirectoryCache, sortItems };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else window.NASPicker = api;
 })();

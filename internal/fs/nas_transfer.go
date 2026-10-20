@@ -68,6 +68,9 @@ func transferNAS(ctx context.Context, n *nasTask) error {
 		return err
 	}
 	if r.IsDir {
+		if err := NASValidateTarget(r); err != nil {
+			return err
+		}
 		return root.MkdirAll(r.Relative, 0755)
 	}
 	if err = root.MkdirAll(path.Dir(r.Relative), 0755); err != nil {

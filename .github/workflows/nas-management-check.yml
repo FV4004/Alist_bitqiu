@@ -1,7 +1,7 @@
 name: Check NAS management changes
 on:
   push:
-    branches: ['nas-management-*']
+    branches: ['nas-management-*', '!nas-management-compare-preview']
   pull_request:
     branches: [main]
 permissions:
