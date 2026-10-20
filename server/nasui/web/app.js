@@ -297,8 +297,9 @@
   function showScan(data){
     const job=data?.job;if(!job){state.scanRunning=false;comparison.jobID='';comparison.running=false;$('compare-progress').textContent='此范围暂无扫描记录';$('scan-history').textContent='暂无完整扫描结果缓存';$('scan-meter').hidden=true;$('scan-percent').textContent='';$('compare-cancel').disabled=true;comparison.scanID='';comparison.items=[];$('compare-results').hidden=true;scanScopeUI();return;}
     comparison.jobID=job.id;comparison.running=!!scanActive(job);state.scanRunning=comparison.running;$('compare-cancel').disabled=!comparison.running||job.state==='canceling';
-    const meter=$('scan-meter');meter.hidden=false;
-    if(job.percent>=0){meter.value=job.percent;$('scan-percent').textContent=job.percent+'%';}else{meter.removeAttribute('value');$('scan-percent').textContent='正在统计总数';}
+    const meter=$('scan-meter');meter.hidden=!comparison.running&&job.state!=='completed';
+    if(!comparison.running&&job.state!=='completed'){$('scan-percent').textContent=job.percent>=0?Math.min(99,job.percent)+'%（未完成）':'未完成';}
+    else if(job.percent>=0){meter.value=job.percent;$('scan-percent').textContent=job.percent+'%';}else{meter.removeAttribute('value');$('scan-percent').textContent='正在统计总数';}
     const labels={enumerating:'正在统计所选范围',checking:'正在扫描 NAS 缺失项目',canceling:'正在取消扫描',completed:'扫描完成',partial:'上次扫描未完成：存在读取失败的分支',canceled:'上次扫描已取消',interrupted:'上次扫描因服务重启中断',timed_out:'上次扫描超时',failed:'上次扫描失败'};
     $('compare-progress').textContent=(labels[job.state]||job.state)+(comparison.running?` · 已发现 ${job.discovered} 项${job.stage==='checking'?'，已处理 '+job.processed+' / '+job.total+' 项':''} · ${job.current||'根目录'} · 离开页面仍继续`:job.message?' · '+job.message:'');
     comparison.resultTime=data.result?.completed_at||comparison.resultTime;
