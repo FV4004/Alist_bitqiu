@@ -25,8 +25,8 @@ with sync_playwright() as p:
     path=urlparse(r.request.url).path.removeprefix(prefix)
     if path.startswith('/api/'):
      body=r.request.post_data_json if r.request.post_data else {};calls.append((path,body))
-     if path.endswith('/targets'):return reply(r,{'cloud':[{'path':'/cloud','label':'cloud'}],'local':[{'path':'/NAS','label':'NAS'}],'default_nas_path':'/NAS','mount_ready':True})
-     if path.endswith('/list-stream'):return r.fulfill(content_type='application/x-ndjson',body=json.dumps({'event':'batch','items':[{'name':'missing.txt','size':10,'size_known':True,'is_dir':False}],'provisional':True})+'\n'+json.dumps({'event':'done','total':1,'complete':True})+'\n')
+     if path.endswith('/targets'):return reply(r,{'cloud':[{'path':'/cloud','label':'cloud'}],'targets':[{'path':'/NAS','label':'NAS'}],'downloads_enabled':True})
+     if path.endswith('/list-stream'):return r.fulfill(content_type='application/x-ndjson',body=json.dumps({'event':'batch','content':[{'name':'missing.txt','size':10,'size_known':True,'is_dir':False}],'provisional':True})+'\n'+json.dumps({'event':'done','total':1,'complete':True})+'\n')
      if path.endswith('/entries'):return reply(r,[])
      if path.endswith('/stats'):return reply(r,{'bytes':10,'files':1,'directories':0,'unknown':0})
      if path.endswith('/tasks'):return reply(r,{'active':[],'history':[],'concurrency':{'limit':5,'maximum':5}})

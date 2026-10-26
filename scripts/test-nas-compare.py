@@ -30,7 +30,7 @@ with sync_playwright() as p:
      if path.endswith('/tasks'):return reply(r,{'active':[],'history':[],'concurrency':{'limit':5,'running':0}})
      if path.endswith('/stats'):return reply(r,{'known_bytes':501,'unknown_count':0,'file_count':2})
      if path.endswith('/scan/start'):
-      assert body=={'src_dir':'/cloud','dst_dir':'/NAS','names':['z.txt','a.txt','folder']},body
+      assert body=={'src_dir':'/cloud','dst_dir':'/NAS','names':['z.txt','a.txt','folder'],'options':{'enabled':True,'nas_only':True,'cross_directory':False,'full_hash':False}},body
       cfg['polls']=0;cfg['job']={'id':'job-'+str(len(calls)),'source':'/cloud','destination':'/NAS','names':body['names'],'state':'enumerating','stage':'enumerating','percent':-1,'discovered':2,'processed':0,'total':0,'started_at':'2026-10-20T01:00:00Z'}
       return reply(r,{'job':cfg['job'],'result':cfg['result']})
      if path.endswith('/scan/cancel'):
