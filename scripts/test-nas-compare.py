@@ -3,12 +3,16 @@ from nas_browser_helpers import UNRESTRICTED_SIZE
 from pathlib import Path
 from urllib.parse import urlparse
 import json
+import os
 from playwright.sync_api import sync_playwright,expect
 ROOT=Path(__file__).resolve().parents[1]/'server/nasui/web'
 OUT=Path('/tmp/alist-nas-ui');OUT.mkdir(exist_ok=True)
 with sync_playwright() as p:
- for engine in [p.chromium,p.webkit]:
-  browser=engine.launch(headless=True)
+ for name in os.environ.get('NAS_TEST_ENGINES','chromium,webkit').split(','):
+  engine=getattr(p,name)
+  launch={'headless':True}
+  if name=='chromium' and Path('/usr/bin/chromium').exists():launch.update(executable_path='/usr/bin/chromium',args=['--no-sandbox','--disable-dev-shm-usage'])
+  browser=engine.launch(**launch)
   for prefix in ['', '/alist']:
    context=browser.new_context(viewport={'width':390,'height':844},is_mobile=True,has_touch=True)
    context.add_init_script("localStorage.setItem('token','fixture-token');localStorage.setItem('alist_client_id','fixture-device')")
@@ -32,7 +36,7 @@ with sync_playwright() as p:
      if path.endswith('/tasks'):return reply(r,{'active':[],'history':[],'concurrency':{'limit':5,'running':0}})
      if path.endswith('/stats'):return reply(r,{'known_bytes':501,'unknown_count':0,'file_count':2})
      if path.endswith('/scan/start'):
-      assert body=={'src_dir':'/cloud','dst_dir':'/NAS','names':['z.txt','a.txt','folder'],'options':{'enabled':True,'nas_only':True,'cross_directory':False,'full_hash':False}},body
+      assert body=={'src_dir':'/cloud','dst_dir':'/NAS','names':['z.txt','a.txt','folder'],'options':{'enabled':True,'matching':'name-v1','nas_only':True,'cross_directory':True,'full_hash':False}},body
       cfg['polls']=0;cfg['job']={'id':'job-'+str(len(calls)),'source':'/cloud','destination':'/NAS','names':body['names'],'state':'enumerating','stage':'enumerating','percent':-1,'discovered':2,'processed':0,'total':0,'started_at':'2026-10-20T01:00:00Z'}
       return reply(r,{'job':cfg['job'],'result':cfg['result']})
      if path.endswith('/scan/cancel'):
