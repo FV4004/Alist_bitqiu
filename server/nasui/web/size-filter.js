@@ -38,8 +38,8 @@
       if (file.is_dir || !this.active(side)) return true;
       if (!knownSize(file)) return false;
       return (
-        (this.min === null || file.size >= Math.round(this.min * MB)) &&
-        (this.max === null || file.size <= Math.round(this.max * MB))
+        (this.min === null || file.size >= this.min * MB) &&
+        (this.max === null || file.size <= this.max * MB)
       );
     }
     setBounds(min, max) {

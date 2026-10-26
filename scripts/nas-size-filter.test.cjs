@@ -14,7 +14,10 @@ test('blank bounds are independently unlimited; zero remains a real bound',()=>{
  const f=new SizeFilter();f.setBounds('','');assert.equal(f.active('source'),false);assert.equal(f.matches({size_known:false},'source'),true);
  f.setBounds('', '80');assert.equal(f.matches(file(0),'source'),true);assert.equal(f.matches(file(80),'source'),true);assert.equal(f.matches(file(80.000001),'source'),false);
  f.setBounds('0','0');assert.equal(f.matches(file(0),'source'),true);assert.equal(f.matches(file(0.000001),'source'),false);assert.equal(f.matches({size_known:false,size:0},'source'),false);
- f.setBounds('80.000001','80.000001');assert.equal(f.matches(file(80.000001),'source'),true);assert.equal(f.matches(file(80),'source'),false);
+ f.setBounds('80.5','80.5');assert.equal(f.matches(file(80.5),'source'),true);assert.equal(f.matches(file(80),'source'),false);
+ // A fractional-byte boundary must not be rounded into the allowed range.
+ f.setBounds('0.000001','');assert.equal(f.matches({size:1},'source'),false);assert.equal(f.matches({size:2},'source'),true);
+ f.setBounds('','0.000001');assert.equal(f.matches({size:1},'source'),true);assert.equal(f.matches({size:2},'source'),false);
 });
 test('invalid and reversed inputs preserve the last applied range',()=>{
  const f=new SizeFilter();f.setBounds('80','500');
