@@ -324,10 +324,11 @@ func scanNASInventory(ctx context.Context, j *nasScanJob, s *nasComparison, actu
 		}
 		return nil
 	}
-	for _, name := range j.Names {
-		if err := walk(name, 0); err != nil {
-			return err
-		}
+	// The chosen NAS directory is its own explicit scope. Enumerate its full
+	// subtree, including siblings of selected source files, so renamed or moved
+	// counterparts cannot disappear from the candidate pool.
+	if err := walk(".", 0); err != nil {
+		return err
 	}
 	// Refresh complete parent listings, rather than op.Get's directory cache.
 	// Also compare directory membership so newly added files are not missed.
@@ -372,6 +373,9 @@ func scanNASInventory(ctx context.Context, j *nasScanJob, s *nasComparison, actu
 		s.inventoryObjects = append(s.inventoryObjects, obj)
 	}
 	for _, obj := range target {
+		if obj.Path == "." {
+			continue
+		}
 		obj.Side = "nas"
 		s.inventoryObjects = append(s.inventoryObjects, obj)
 	}
@@ -431,6 +435,9 @@ func scanNASInventory(ctx context.Context, j *nasScanJob, s *nasComparison, actu
 	if j.Options.NASOnly {
 		keys = keys[:0]
 		for rel := range target {
+			if rel == "." {
+				continue
+			}
 			if _, ok := source[rel]; !ok {
 				keys = append(keys, rel)
 			}

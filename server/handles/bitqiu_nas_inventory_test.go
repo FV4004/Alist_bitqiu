@@ -116,6 +116,11 @@ func testNASInventoryWorkflow(t *testing.T, source, dest string, invoke func(gin
 	write(source, "chosen/old_name.txt", "rename")
 	write(dest, "chosen/old-name.txt", "rename")
 	write(dest, "chosen/only.txt", "nas only")
+	write(source, "chosen/moved.txt", "move")
+	write(dest, "elsewhere/moved.txt", "move")
+	write(source, "chosen/ambiguous.txt", "multiple")
+	write(dest, "candidate-a/ambiguous.txt", "multiple")
+	write(dest, "candidate-b/ambiguous.txt", "multiple")
 	// Batch validation lists a paginated parent once per request, and refreshes
 	// it again for the separate final-confirmation request.
 	batchDriver, _ := op.GetStorageByMountPath("/cloud")
@@ -180,10 +185,16 @@ func testNASInventoryWorkflow(t *testing.T, source, dest string, invoke func(gin
 	for _, v := range r.Result.Items {
 		byPath[v.Relative] = v
 	}
-	for rel, kind := range map[string]string{"chosen/missing.txt": "suspected_missing", "chosen/same.txt": "size_difference", "chosen/old_name.txt": "suspected_rename", "chosen/only.txt": "nas_only"} {
+	for rel, kind := range map[string]string{"chosen/missing.txt": "suspected_missing", "chosen/same.txt": "size_difference", "chosen/old_name.txt": "suspected_rename", "chosen/only.txt": "nas_only", "chosen/moved.txt": "suspected_move", "chosen/ambiguous.txt": "suspected_move"} {
 		if byPath[rel].Category != kind {
 			t.Fatalf("%s: %+v", rel, byPath[rel])
 		}
+	}
+	if len(byPath["chosen/ambiguous.txt"].Detail.Candidates) != 2 {
+		t.Fatal("lost ambiguity across NAS directories")
+	}
+	if len(byPath["chosen/moved.txt"].Detail.Candidates) != 1 {
+		t.Fatal("did not inventory the chosen NAS root")
 	}
 	v := byPath["chosen/missing.txt"]
 	before := decode(invoke(BitQiuNASScanStatus, map[string]any{"job_id": r.Job.ID}, true))
@@ -304,6 +315,17 @@ func testNASInventoryWorkflow(t *testing.T, source, dest string, invoke func(gin
 	if restored.Result == nil {
 		t.Fatal("lost persisted result")
 	}
+	// A single selected source file still sees renamed siblings inside the
+	// explicit NAS root. Cross-directory matching uses that root, never its parent.
+	write(source, "old-root.txt", "root rename")
+	write(dest, "old_root.txt", "root rename")
+	savedReq := req
+	req = map[string]any{"src_dir": "/cloud/inventory-fixture", "dst_dir": "/nas/inventory-fixture", "names": []string{"old-root.txt"}, "options": nasInventoryOptions{Enabled: true}}
+	single := scan()
+	if len(single.Result.Items) != 1 || single.Result.Items[0].Category != "suspected_rename" || len(single.Result.Items[0].Detail.Candidates) != 1 {
+		t.Fatal("single-file scan lost renamed sibling", single.Result.Items)
+	}
+	req = savedReq
 	// A new incomplete scan preserves the complete result and exposes issues.
 	driver, _ := op.GetStorageByMountPath("/cloud")
 	fixture := driver.(*nasFixtureDriver)
