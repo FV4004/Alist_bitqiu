@@ -2,7 +2,8 @@
   'use strict';
   const base = new URL(document.currentScript.src).pathname.split('/bitqiu-assets/')[0];
   const $ = id => document.getElementById(id);
-  let inventoryUI;
+  let inventoryUI, sizeUI;
+  const sizeFilter = new window.NASSizeFilter.SizeFilter();
   const state = {cloud:[],targets:[],source:'',sourceRoot:'',target:'',targetRoot:'',total:0,items:[],selected:new Set(),loading:false,submitting:false,sourceSeq:0,targetSeq:0,taskBusy:false,orderBy:"modified",orderDirection:"desc",history:[],historyPage:1,selectedMeta:new Map(),taskSelected:new Set(),active:[],historyTab:false,selectAllBusy:false,selectionEpoch:0,limitBusy:false,limitSeq:0,limit:5};
   const join = (p,n) => (p==='/'?'':p.replace(/\/$/,''))+'/'+n;
   const parent = (p,root) => p===root?root:(p.slice(0,p.lastIndexOf('/'))||root);
@@ -19,9 +20,9 @@
   const sourceCache=new DirectoryCache(),targetCache=new DirectoryCache();
   state.targetReady=false;
   const queryFor=side=>state.filter.searchScopes.has(side)?state.filter.query:'';
-  const hasFilter=side=>!!queryFor(side).trim()||(state.filter.typeScopes.has(side)&&state.filter.types.size!==categories.length);
-  const filterKey=side=>JSON.stringify([queryFor(side),state.filter.typeScopes.has(side)?[...state.filter.types].sort():null,sortSpec(side)]);
-  const visible=(file,side)=>matches(file.name,queryFor(side))&&(!state.filter.typeScopes.has(side)||state.filter.types.has(window.NASIcons.type(file.name,file.is_dir)));
+  const hasFilter=side=>!!queryFor(side).trim()||(state.filter.typeScopes.has(side)&&state.filter.types.size!==categories.length)||sizeFilter.active(side);
+  const filterKey=side=>JSON.stringify([queryFor(side),state.filter.typeScopes.has(side)?[...state.filter.types].sort():null,sortSpec(side),sizeFilter.key(side)]);
+  const visible=(file,side)=>matches(file.name,queryFor(side))&&(!state.filter.typeScopes.has(side)||state.filter.types.has(window.NASIcons.type(file.name,file.is_dir)))&&sizeFilter.matches(file,side);
   const sourceVisible=()=>state.items.filter(file=>visible(file,'source'));
   function remember(side){
     const source=side==='source',cache=source?sourceCache:targetCache,root=state[side+'Root'],path=state[side];
@@ -116,13 +117,14 @@
     nameCell.append(heading,el('div',`${file.is_dir?'文件夹':file.size_known===false?'大小未知':bytes(file.size)} · 修改于 ${dateText(file.modified)}`,'file-meta'));tr.append(checkCell,nameCell);return tr;
   }
   function renderSource(){
+    sizeUI?.refresh(state.items,state.targetItems);
     const items=state.sourceAppendOrder?sourceVisible():sortItems(sourceVisible(),...sortSpec('source'));
     const tbody=$('source-files'),scroll=tbody.closest('.table-scroll'),top=scroll.scrollTop,focused=document.activeElement,hadFocus=tbody.contains(focused);
     // Keep existing rows attached when new batches append; do not disturb a pending click/focus.
     let index=0;
     for(const file of items){let row=state.sourceRows.get(file.name);if(!row){row=sourceRow(file);state.sourceRows.set(file.name,row);}if(tbody.children[index]!==row)tbody.insertBefore(row,tbody.children[index]||null);index++;}
     while(tbody.children.length>index)tbody.lastElementChild.remove();
-    if(!items.length){const row=el('tr'),cell=el('td',hasFilter('source')?'没有匹配项，请调整搜索或分类筛选。':state.loading?'正在读取目录，内容将逐批显示…':state.sourceComplete?'此目录为空':'目录未加载完成，请刷新重试','empty');cell.colSpan=2;row.append(cell);tbody.append(row);}
+    if(!items.length){const row=el('tr'),cell=el('td',hasFilter('source')?'没有匹配项，请调整搜索、分类或大小筛选。':state.loading?'正在读取目录，内容将逐批显示…':state.sourceComplete?'此目录为空':'目录未加载完成，请刷新重试','empty');cell.colSpan=2;row.append(cell);tbody.append(row);}
     scroll.scrollTop=top;if(hadFocus&&focused.isConnected&&document.activeElement!==focused)focused.focus({preventScroll:true});selectedUI();
   }
   function sourceMeter(done){$('source-meter').hidden=false;if(done)$('source-meter').value=100;else $('source-meter').removeAttribute('value');$('source-resort').disabled=!done;}
@@ -149,9 +151,10 @@
     finally{if(reader){try{await reader.cancel();}catch{}reader.releaseLock();}if(seq===state.sourceSeq){state.loading=false;$('source-resort').disabled=!state.sourceComplete;renderSource();remember('source');}}
   }
   function renderTarget(){
+    sizeUI?.refresh(state.items,state.targetItems);
     $('target-folders').replaceChildren();const shown=sortItems(state.targetItems.filter(item=>visible(item,'target')),...sortSpec('target'));
     for(const item of shown){const button=el('button',undefined,'folder'+(!item.selectable?' unavailable-file':''));button.disabled=!item.selectable;button.setAttribute('aria-label',item.selectable?'打开 NAS 文件夹 '+item.name:'不可选择文件 '+item.name);button.append(icon(item.name,item.is_dir),el('span',item.name),el('span',item.selectable?'›':item.is_dir?'不可选择':item.size_known?bytes(item.size):'文件 · 不可选择'));if(item.selectable)button.onclick=run(()=>navigate('target',join(state.target,item.path)));$('target-folders').append(button);}
-    if(!shown.length)$('target-folders').append(el('p',state.targetItems.length?(hasFilter('target')?'没有匹配的名称，请调整搜索或分类筛选。':'当前分类没有内容，请调整筛选或重置为全选。'):'此目录为空，可以直接保存到这里。','empty'));
+    if(!shown.length)$('target-folders').append(el('p',state.targetItems.length?(hasFilter('target')?'没有匹配的名称，请调整搜索、分类或大小筛选。':'当前分类没有内容，请调整筛选或重置为全选。'):'此目录为空，可以直接保存到这里。','empty'));
     $('target-count').textContent=`显示 ${shown.length} / ${state.targetItems.length} 项`;
     $('target-filter-summary').textContent=state.filter.types.size===categories.length?'分类：全部':state.filter.types.size===0?'分类：未选':`分类：已选 ${state.filter.types.size} 类`;
     for(const check of $('target-filter-options').querySelectorAll('input'))check.checked=state.filter.types.has(check.value);
@@ -223,6 +226,7 @@
   $('target-filter-reset').onclick=()=>{state.filter.types=new Set(categories.map(x=>x[0]));applyFilters();};
   document.addEventListener('pointerdown',event=>{const filter=$('target-filter');if(filter.open&&!filter.contains(event.target))filter.open=false;});
   $('target-filter').addEventListener('keydown',event=>{if(event.key==='Escape'){$('target-filter').open=false;$('target-filter-summary').focus();}});
+  sizeUI = window.NASSizeFilter.mount(sizeFilter,{document,onChange:applyFilters});
   function applyFilters(){
     $('picker-search-clear').disabled=!state.filter.query;
     for(const [kind,key]of [['search','searchScopes'],['type','typeScopes'],['sort','sortScopes']]){

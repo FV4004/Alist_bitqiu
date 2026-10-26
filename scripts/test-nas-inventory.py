@@ -1,4 +1,5 @@
 """Six-view inventory/review browser acceptance; deterministic API fixtures only."""
+from nas_browser_helpers import UNRESTRICTED_SIZE
 from pathlib import Path
 from urllib.parse import urlparse
 import copy
@@ -12,6 +13,7 @@ with sync_playwright() as p:
   for prefix in ['', '/alist']:
    context=browser.new_context(viewport={'width':1280,'height':900},accept_downloads=True)
    context.add_init_script("localStorage.setItem('token','fixture-token');localStorage.setItem('alist_client_id','fixture-device')")
+   context.add_init_script(UNRESTRICTED_SIZE)
    page=context.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
    obj={'path':'missing.txt','object_id':'cloud-1','is_dir':False,'size':10,'size_known':True,'modified':'2026-10-26T00:00:00Z','scanned_at':'2026-10-26T00:01:00Z','hashes':{},'hash_verified':False}
    detail={'source':obj,'candidates':[],'reasons':['范围内未发现同路径或候选'],'fingerprint':'evidence-1','reviews':[],'stale':False}
