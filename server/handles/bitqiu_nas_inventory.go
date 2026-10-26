@@ -663,13 +663,34 @@ func inventoryStatistics(objects []nasInventoryObject) gin.H {
 	return sides
 }
 
-// One complete refreshed parent listing, never a cached op.Get result.
+// A preflight request refreshes each parent once, so N selected files in one
+// paginated folder do not trigger N full remote enumerations. A new final
+// confirmation always receives a fresh request-local cache.
+type inventoryValidationKey struct{}
+type inventoryListing struct {
+	objects []model.Obj
+	err     error
+}
+
+func inventoryValidationContext(ctx context.Context) context.Context {
+	return context.WithValue(ctx, inventoryValidationKey{}, map[string]inventoryListing{})
+}
+
+// One complete refreshed parent listing, never a previous request's cache.
 func inventoryFreshObject(ctx context.Context, d driver.Driver, src string) (model.Obj, error) {
-	children, err := op.List(ctx, d, path.Dir(src), model.ListArgs{Refresh: true, NoUpdateIndex: true, OnPage: func(_ []model.Obj) error { return ctx.Err() }})
-	if err != nil {
-		return nil, err
+	cache, _ := ctx.Value(inventoryValidationKey{}).(map[string]inventoryListing)
+	key := d.GetStorage().MountPath + "\x00" + path.Dir(src)
+	listing, found := cache[key]
+	if !found {
+		listing.objects, listing.err = op.List(ctx, d, path.Dir(src), model.ListArgs{Refresh: true, NoUpdateIndex: true, OnPage: func(_ []model.Obj) error { return ctx.Err() }})
+		if cache != nil {
+			cache[key] = listing
+		}
 	}
-	for _, obj := range children {
+	if listing.err != nil {
+		return nil, listing.err
+	}
+	for _, obj := range listing.objects {
 		if obj.GetName() == path.Base(src) {
 			return obj, nil
 		}

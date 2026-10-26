@@ -380,6 +380,9 @@ func BitQiuNASScanCancel(c *gin.Context) {
 	common.ErrorStrResp(c, "扫描任务不存在", 404)
 }
 func enumerateNASScan(ctx context.Context, j *nasScanJob, s *nasComparison, actual string) (int, error) {
+	if j.Options.Enabled {
+		ctx = inventoryValidationContext(ctx)
+	}
 	discovered := 0
 	ancestors := map[string]bool{}
 	update := func(rel string) {

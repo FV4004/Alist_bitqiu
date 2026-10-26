@@ -517,6 +517,7 @@ func BitQiuNASComparePrepare(c *gin.Context) {
 	}
 	records := []fs.NASRecord{}
 	skipped := []nasCompareSkip{}
+	validationCtx := inventoryValidationContext(c.Request.Context())
 	occupied := compareOccupied()
 	dedup := map[string]bool{}
 	batch := rand.Text()
@@ -541,7 +542,7 @@ func BitQiuNASComparePrepare(c *gin.Context) {
 			continue
 		}
 		if v.Detail != nil {
-			if e := inventoryPreflight(c.Request.Context(), user, req.ScanID, v); e != nil {
+			if e := inventoryPreflight(validationCtx, user, req.ScanID, v); e != nil {
 				skipped = append(skipped, nasCompareSkip{v.Relative, e.Error()})
 				continue
 			}
@@ -680,10 +681,11 @@ func BitQiuNASCompareCommit(c *gin.Context) {
 	}
 	records := []fs.NASRecord{}
 	skipped := []nasCompareSkip{}
+	validationCtx := inventoryValidationContext(c.Request.Context())
 	occupied := compareOccupied()
 	for _, r := range plan.records {
 		if v, ok := plan.evidence[r.Source]; ok {
-			if err := inventoryPreflight(c.Request.Context(), user, plan.scanID, v); err != nil {
+			if err := inventoryPreflight(validationCtx, user, plan.scanID, v); err != nil {
 				skipped = append(skipped, nasCompareSkip{r.Destination, err.Error()})
 				continue
 			}

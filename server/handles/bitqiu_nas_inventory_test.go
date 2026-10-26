@@ -116,6 +116,32 @@ func testNASInventoryWorkflow(t *testing.T, source, dest string, invoke func(gin
 	write(source, "chosen/old_name.txt", "rename")
 	write(dest, "chosen/old-name.txt", "rename")
 	write(dest, "chosen/only.txt", "nas only")
+	// Batch validation lists a paginated parent once per request, and refreshes
+	// it again for the separate final-confirmation request.
+	batchDriver, _ := op.GetStorageByMountPath("/cloud")
+	batchFixture := batchDriver.(*nasFixtureDriver)
+	batchHook := batchFixture.streamHook
+	listCalls := 0
+	batchFixture.streamHook = func(ctx context.Context, objs []model.Obj, args model.ListArgs) ([]model.Obj, error) {
+		listCalls++
+		return objs, nil
+	}
+	batchCtx := inventoryValidationContext(context.Background())
+	for _, name := range []string{"missing.txt", "same.txt"} {
+		if _, err := inventoryFreshObject(batchCtx, batchDriver, "/inventory-fixture/chosen/"+name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if listCalls != 1 {
+		t.Fatal("preflight repeated full pagination per file", listCalls)
+	}
+	if _, err := inventoryFreshObject(inventoryValidationContext(context.Background()), batchDriver, "/inventory-fixture/chosen/missing.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if listCalls != 2 {
+		t.Fatal("confirmation reused earlier preflight data")
+	}
+	batchFixture.streamHook = batchHook
 	code := func(v map[string]json.RawMessage) int { var n int; _ = json.Unmarshal(v["code"], &n); return n }
 	type view struct {
 		Job    *nasScanJob `json:"job"`
