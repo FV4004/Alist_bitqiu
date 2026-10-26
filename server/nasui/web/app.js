@@ -2,6 +2,7 @@
   'use strict';
   const base = new URL(document.currentScript.src).pathname.split('/bitqiu-assets/')[0];
   const $ = id => document.getElementById(id);
+  let inventoryUI;
   const state = {cloud:[],targets:[],source:'',sourceRoot:'',target:'',targetRoot:'',total:0,items:[],selected:new Set(),loading:false,submitting:false,sourceSeq:0,targetSeq:0,taskBusy:false,orderBy:"modified",orderDirection:"desc",history:[],historyPage:1,selectedMeta:new Map(),taskSelected:new Set(),active:[],historyTab:false,selectAllBusy:false,selectionEpoch:0,limitBusy:false,limitSeq:0,limit:5};
   const join = (p,n) => (p==='/'?'':p.replace(/\/$/,''))+'/'+n;
   const parent = (p,root) => p===root?root:(p.slice(0,p.lastIndexOf('/'))||root);
@@ -263,7 +264,6 @@
   $('history-clear-selected').onclick=run(()=>clearHistory('selected',state.history.flatMap(taskIDs).filter(id=>state.taskSelected.has(id))));
   $('tasks-refresh').onclick=run(loadTasks);
   const comparison={items:[],issues:[],selected:new Set(),tab:'files',limit:200,seq:0,running:false,controller:null,scanID:'',plan:null,finalLimit:200,busy:false};
-  let inventoryUI;
   inventoryUI=window.NASInventory.create({api,state,run,bytes,headers:requestHeaders,base,prepare:async(scanID,ids)=>{comparison.scanID=scanID;comparison.selected=new Set(ids);await $('compare-prepare').onclick();}});
   function compareRows(){return comparison.items.filter(item=>item.category===comparison.tab);}
   function compareSelection(){const rows=compareRows().filter(x=>!x.blocked),marked=rows.filter(x=>comparison.selected.has(x.id)).length;$('compare-select-all').checked=rows.length>0&&marked===rows.length;$('compare-select-all').indeterminate=marked>0&&marked<rows.length;$('compare-select-all').disabled=!rows.length;$('compare-selected').textContent=`已选 ${comparison.selected.size} 项（文件夹及其文件将在清单中去重）`;$('compare-prepare').disabled=!comparison.selected.size||comparison.running||comparison.busy;}
