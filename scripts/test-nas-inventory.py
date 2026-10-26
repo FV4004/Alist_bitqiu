@@ -1,22 +1,28 @@
 """Six-view inventory/review browser acceptance; deterministic API fixtures only."""
+from nas_browser_helpers import UNRESTRICTED_SIZE
 from pathlib import Path
 from urllib.parse import urlparse
 import copy
+import os
 import json
 from playwright.sync_api import sync_playwright, expect
 ROOT=Path(__file__).resolve().parents[1]/'server/nasui/web'
 OUT=Path('/tmp/alist-nas-ui');OUT.mkdir(exist_ok=True)
 with sync_playwright() as p:
- for engine in [p.chromium,p.webkit]:
-  browser=engine.launch(headless=True)
+ for name in os.environ.get('NAS_TEST_ENGINES','chromium,webkit').split(','):
+  engine=getattr(p,name)
+  launch={'headless':True}
+  if name=='chromium' and Path('/usr/bin/chromium').exists():launch.update(executable_path='/usr/bin/chromium',args=['--no-sandbox','--disable-dev-shm-usage'])
+  browser=engine.launch(**launch)
   for prefix in ['', '/alist']:
    context=browser.new_context(viewport={'width':1280,'height':900},accept_downloads=True)
    context.add_init_script("localStorage.setItem('token','fixture-token');localStorage.setItem('alist_client_id','fixture-device')")
+   context.add_init_script(UNRESTRICTED_SIZE)
    page=context.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
    obj={'path':'missing.txt','object_id':'cloud-1','is_dir':False,'size':10,'size_known':True,'modified':'2026-10-26T00:00:00Z','scanned_at':'2026-10-26T00:01:00Z','hashes':{},'hash_verified':False}
    detail={'source':obj,'candidates':[],'reasons':['范围内未发现同路径或候选'],'fingerprint':'evidence-1','reviews':[],'stale':False}
    item={'id':'missing','relative':'missing.txt','category':'suspected_missing','is_dir':False,'size':10,'blocked':False,'detail':detail}
-   options={'enabled':True,'nas_only':True,'cross_directory':False,'full_hash':False}
+   options={'enabled':True,'nas_only':True,'cross_directory':True,'matching':'name-v1','full_hash':False}
    result={'scan_id':'scan-1','source':'/cloud','destination':'/NAS','names':['missing.txt'],'options':options,'completed_at':'2026-10-26T00:01:00Z','items':[item],'issues':[],'inventory':[{**obj,'side':'bitqiu'}]}
    job={'id':'scan-1','source':'/cloud','destination':'/NAS','names':['missing.txt'],'options':options,'state':'completed','percent':100}
    cfg={'started':False,'prepares':0,'commits':0};calls=[]
@@ -32,7 +38,7 @@ with sync_playwright() as p:
      if path.endswith('/tasks'):return reply(r,{'active':[],'history':[],'concurrency':{'limit':5,'maximum':5}})
      if path.endswith('/scan/status'):return reply(r,{'job':job if cfg['started'] else None,'result':result if cfg['started'] else None})
      if path.endswith('/scan/start'):
-      assert body['options']['enabled'];cfg['started']=True;return reply(r,{'job':job,'result':result})
+      assert body['options']['enabled'] and body['options']['cross_directory'] and body['options']['matching']=='name-v1';cfg['started']=True;return reply(r,{'job':job,'result':result})
      if path.endswith('/scan/review'):
       assert body['ids']==['missing'];assert body['fingerprints']=={'missing':'evidence-1'}
       item['detail']['reviews'].append({'decision':body['decision'],'note':body['note'],'reviewer_name':'admin','at':'2026-10-26T00:02:00Z','fingerprint':'evidence-1'})
@@ -53,6 +59,7 @@ with sync_playwright() as p:
    expect(page.locator('#source-files input[type=checkbox]')).to_have_count(1)
    page.locator('#source-files input[type=checkbox]').check();page.locator('#compare-start').click()
    module=page.locator('#inventory-module');expect(module.get_by_role('tab')).to_have_count(6)
+   module.get_by_role('tab',name='1 范围设置').click();expect(module).to_contain_text('按名称匹配');expect(module).to_contain_text('不要求两端路径对应')
    module.get_by_role('tab',name='2 双端盘点').click();expect(module).to_contain_text('1 个文件')
    module.get_by_role('tab',name='3 差异匹配').click();expect(module).to_contain_text('疑似缺失')
    module.get_by_role('tab',name='6 补缺下载').click();expect(module.locator('.inventory-row')).to_have_count(0)
@@ -71,7 +78,16 @@ with sync_playwright() as p:
    page.locator('#compare-back').click();assert cfg['commits']==0
    module.get_by_role('button',name='生成最终去重清单').click();page.locator('#compare-confirm-check').check();page.locator('#compare-submit').click();expect(page.locator('#compare-confirm')).not_to_be_visible();assert cfg['commits']==1
    page.screenshot(path=str(OUT/f'inventory-{engine.name}-{prefix.replace("/","") or "root"}.png'),full_page=True)
+   # Persisted old rules remain visible but cannot authorize reviews/downloads.
+   options.pop('matching')
+   page.reload()
+   module.get_by_role('tab',name='4 人工复核').click()
+   expect(module).to_contain_text('旧版规则，请重新盘点')
+   module.get_by_text('并列信息、候选与复核记录',exact=True).click()
+   expect(module.get_by_role('button',name='已确认缺失',exact=True)).to_be_disabled()
+   module.get_by_role('tab',name='6 补缺下载').click()
+   expect(module.locator('.inventory-row')).to_have_count(0)
    assert not errors,errors
    context.close()
   browser.close()
-print('PASS: six inventory views, explicit review/selection, export, two-phase supplement (Chromium/WebKit, root/prefix)')
+print('PASS: six inventory views, name matching scope, old-rule read-only protection, explicit review/selection, export, two-phase supplement (root/prefix)')

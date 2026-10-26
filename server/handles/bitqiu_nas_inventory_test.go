@@ -26,10 +26,10 @@ func TestInventoryEvidenceMatching(t *testing.T) {
 		kind   string
 		count  int
 	}{
-		{"same path different size", map[string]nasInventoryObject{a.Path: {Path: a.Path, Size: 11, SizeKnown: true}}, false, "size_difference", 0},
-		{"unknown is not zero", map[string]nasInventoryObject{a.Path: {Path: a.Path, Size: 0, SizeKnown: false}}, false, "indeterminate", 0},
-		{"same path unverified", map[string]nasInventoryObject{a.Path: {Path: a.Path, Size: 10, SizeKnown: true}}, false, "content_unverified", 0},
-		{"move scoped off", map[string]nasInventoryObject{"b/movie.mkv": {Path: "b/movie.mkv", Size: 10, SizeKnown: true}}, false, "suspected_missing", 0},
+		{"same path different size", map[string]nasInventoryObject{a.Path: {Path: a.Path, Size: 11, SizeKnown: true}}, false, "size_difference", 1},
+		{"unknown is not zero", map[string]nasInventoryObject{a.Path: {Path: a.Path, Size: 0, SizeKnown: false}}, false, "indeterminate", 1},
+		{"same path unverified", map[string]nasInventoryObject{a.Path: {Path: a.Path, Size: 10, SizeKnown: true}}, false, "content_unverified", 1},
+		{"legacy flag cannot restrict names", map[string]nasInventoryObject{"b/movie.mkv": {Path: "b/movie.mkv", Size: 10, SizeKnown: true}}, false, "suspected_move", 1},
 		{"move scoped on", map[string]nasInventoryObject{"b/movie.mkv": {Path: "b/movie.mkv", Size: 10, SizeKnown: true}}, true, "suspected_move", 1},
 		{"rename", map[string]nasInventoryObject{"a/movie_.mkv": {Path: "a/movie_.mkv", Size: 10, SizeKnown: true}}, false, "suspected_rename", 1},
 		{"ambiguity", map[string]nasInventoryObject{"b/movie.mkv": {Path: "b/movie.mkv"}, "c/movie.mkv": {Path: "c/movie.mkv"}}, true, "suspected_move", 2},
@@ -166,7 +166,7 @@ func testNASInventoryWorkflow(t *testing.T, source, dest string, invoke func(gin
 		}
 		return r
 	}
-	req := map[string]any{"src_dir": "/cloud/inventory-fixture", "dst_dir": "/nas/inventory-fixture", "names": []string{"chosen"}, "options": nasInventoryOptions{Enabled: true, NASOnly: true, FullHash: true, CrossDirectory: true}}
+	req := map[string]any{"src_dir": "/cloud/inventory-fixture", "dst_dir": "/nas/inventory-fixture", "names": []string{"chosen"}, "options": nasInventoryOptions{Enabled: true, NASOnly: true, FullHash: true, CrossDirectory: false}}
 	scan := func() view {
 		t.Helper()
 		r := decode(invoke(BitQiuNASScanStart, req, true))
@@ -181,6 +181,14 @@ func testNASInventoryWorkflow(t *testing.T, source, dest string, invoke func(gin
 		return r
 	}
 	r := scan()
+	if r.Job.Options.Matching != inventoryMatchingVersion || !r.Job.Options.CrossDirectory {
+		t.Fatal("scan did not normalize name matching options")
+	}
+	for _, v := range r.Result.Items {
+		if v.Relative == "elsewhere/moved.txt" && v.Category == "nas_only" {
+			t.Fatal("matched NAS candidate also counted as NAS-only")
+		}
+	}
 	byPath := map[string]nasCompareItem{}
 	for _, v := range r.Result.Items {
 		byPath[v.Relative] = v

@@ -1,4 +1,5 @@
 """Directory picker acceptance: fuzzy selection, cache, back/forward and refresh."""
+from nas_browser_helpers import UNRESTRICTED_SIZE
 from pathlib import Path
 from collections import Counter
 from urllib.parse import urlparse
@@ -11,6 +12,7 @@ with sync_playwright() as p:
   for prefix in ['', '/alist']:
    context=browser.new_context(viewport={'width':390,'height':844},is_mobile=True,has_touch=True)
    context.add_init_script("localStorage.setItem('token','fixture-token');localStorage.setItem('alist_client_id','fixture-device')")
+   context.add_init_script(UNRESTRICTED_SIZE)
    page=context.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
    calls=Counter();cfg={'fail_child':False,'hold_target':False};held=[]
    files=[{'name':f'file-{i:03d}.txt','is_dir':False,'size':100,'size_known':True} for i in range(50)]+[{'name':'file-电视剧','is_dir':True},{'name':'报告2026.PDF','is_dir':False,'size':123,'size_known':True}]

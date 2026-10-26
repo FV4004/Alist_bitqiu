@@ -1,7 +1,7 @@
 name: NAS inventory prerelease (offline artifacts only)
 on:
   push:
-    branches: [nas-management-inventory-review]
+    branches: [nas-management-cpu-compat]
   workflow_dispatch:
 permissions:
   contents: write
@@ -10,8 +10,8 @@ concurrency:
   cancel-in-progress: true
 jobs:
   test-build-release:
-    if: github.ref == 'refs/heads/nas-management-inventory-review'
-    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/nas-management-cpu-compat'
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -28,8 +28,9 @@ jobs:
           go test -race ./internal/fs -run '^TestNAS'
           go test -race ./internal/op -run '^TestPendingLoginCanBeCreatedAndEdited$'
           go test -race ./server/handles -run '^Test(Inventory|BitQiuNASIntegration|NASTaskInfo)'
-          node --test scripts/nas-ui.test.cjs scripts/nas-picker.test.cjs
+          node --test scripts/nas-ui.test.cjs scripts/nas-picker.test.cjs scripts/nas-size-filter.test.cjs
           node --check server/nasui/web/inventory.js
+          node --check server/nasui/web/size-filter.js
       - name: Matching official frontend and browser dependencies
         run: |
           curl --fail --location --retry 3 https://github.com/AlistGo/alist-web/releases/download/3.65.0/dist.tar.gz -o /tmp/frontend.tar.gz
@@ -46,11 +47,14 @@ jobs:
           python scripts/test-nas-picker.py
           python scripts/test-nas-compare.py
           python scripts/test-nas-inventory.py
+          python scripts/test-nas-size-filter.py
       - name: Build supported linux amd64 static binary
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y musl-tools
+          sudo apt-get install -y musl-tools qemu-user
           bash scripts/build-bitqiu.sh
+      - name: Verify actual binary on pre-AVX CPUs, SQLite and restart
+        run: python scripts/test-amd64-baseline.py build/alist
       - name: Build and smoke test local image, without registry authentication
         run: |
           docker build --platform linux/amd64 -f Dockerfile.bitqiu --build-arg VCS_REF="$GITHUB_SHA" -t alist-bitqiu:inventory-${GITHUB_SHA::12} .
@@ -73,7 +77,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tag="nas-inventory-preview-${GITHUB_SHA::12}"
-          gh release create "$tag" prerelease/* --target "$GITHUB_SHA" --prerelease --latest=false --title "NAS inventory and review preview ${GITHUB_SHA::12}" --notes-file docs/NAS_INVENTORY_PRERELEASE.md
+          gh release create "$tag" prerelease/* --target "$GITHUB_SHA" --prerelease --latest=false --title "NAS CPU compatibility fix preview ${GITHUB_SHA::12}" --notes-file docs/NAS_INVENTORY_PRERELEASE.md
       - uses: actions/upload-artifact@v4
         if: always()
         with:
