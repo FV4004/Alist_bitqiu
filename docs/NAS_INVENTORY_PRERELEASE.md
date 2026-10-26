@@ -2,6 +2,14 @@
 
 本版在功能分支开发，不合并 main。测试平台沿用仓库支持的 Linux amd64；其他架构尚未提供构建和验收。测试入口为 `/@nas`，支持现有 AList 访问前缀。
 
+## 本次修复：NAS CPU 兼容性（v3.65.0-bitqiu.24-cpu-compat-preview）
+
+v23 在部分不支持 AVX 的 x86 NAS CPU 上启动即退出 132（SIGILL），自动重启策略导致容器循环重启。已用下载的正式预发布二进制复现：QEMU Nehalem CPU 下 v22 正常、v23 退出 SIGILL，现代 CPU 模型两者均正常。v22 构建日志为 Ubuntu 24.04，v23 的 ubuntu-latest 已切换为 Ubuntu 26.04，其静态 musl 开发库来自 amd64v3 包。即使 Go 元数据为 GOAMD64=v1，也不能限制已编译的 C 库；先前在新 CPU 上的启动检查漏掉了这一兼容性问题。
+
+修复将构建与检查工作流固定到 Ubuntu 24.04，显式设置 GOAMD64=v1 及 C/C++ 的 -march=x86-64 -mtune=generic。发布前必须让最终静态二进制在 QEMU qemu64 和 Nehalem 两种无 AVX CPU 模型中运行版本命令、初始化 SQLite、启动 NAS HTTP 页面并使用同一数据重启；任何失败均禁止打包发布。Go 内部经运行时检测选择的可选 SIMD 优化仍保留。CPU 模拟通过不等于真实 NAS 已验收，仍需用户设备验证。
+
+本修复保留 v23 名称匹配和 v22 大小筛选，不改变应用数据结构、挂载要求、PUID/PGID、下载路径或权限检查；不通过关闭安全保护处理退出问题。v23 原产物不替换、不复用标签，以独立 Pre-release 发布 v24。升级时停止旧容器、备份整个数据目录，保留端口和两个挂载配置，再导入本版离线镜像。如需临时回退，v22 已通过上述无 AVX 版本命令对照测试；回退仍须遵守下方备份和缓存兼容说明。
+
 ## 本次新增：名称优先匹配（v3.65.0-bitqiu.23-name-match-preview）
 
 两端目录层级可以完全不同。新盘点始终在右侧选定 NAS 根目录的全部后代中寻找名称/可信哈希候选，先前的跨目录开关不再限制新盘点。来源仍仅盘点明确勾选的文件或文件夹。相对路径用于展示及补缺目标，不作为查找候选的前提；补缺仍按来源相对路径写入所选目标，不自动猜测新下载目录。
@@ -55,7 +63,7 @@ NAS 下载页面的“文件分类”下方新增大小范围筛选，拖动条�
 
 ## 发布隔离
 
-新增工作流只在 `nas-management-name-match` 分支运行，测试通过后构建本地镜像、导出离线文件并创建 GitHub Pre-release，`make_latest` 为 false。无 registry 登录、镜像推送或生产部署步骤，只有 `contents: write` 权限。
+新增工作流只在 `nas-management-cpu-compat` 分支运行，测试通过后构建本地镜像、导出离线文件并创建 GitHub Pre-release，`make_latest` 为 false。无 registry 登录、镜像推送或生产部署步骤，只有 `contents: write` 权限。
 
 生产工作流增加 job 级 `refs/heads/main` 限制，阻止预发布标签误触发生产发布。新预发布标签使用 `nas-inventory-preview-<提交前12位>`，也不匹配旧生产标签模式。回退工作流只监听其原分支，本版不会触发。
 
