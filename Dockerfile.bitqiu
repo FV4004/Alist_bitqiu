@@ -4,7 +4,7 @@ FROM ${BASE_IMAGE}
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.source="https://github.com/FV4004/Alist_bitqiu" \
       org.opencontainers.image.revision="${VCS_REF}" \
-      org.opencontainers.image.version="v3.65.0-bitqiu.22-size-filter-preview" \
+      org.opencontainers.image.version="v3.65.0-bitqiu.23-name-match-preview" \
       org.opencontainers.image.description="AList v3.65.0 with BitQiu Windows client login, SMS device verification and original file download" \
       org.opencontainers.image.licenses="AGPL-3.0"
 COPY --chmod=755 build/alist /opt/alist/alist

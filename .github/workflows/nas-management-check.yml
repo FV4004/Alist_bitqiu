@@ -20,7 +20,7 @@ jobs:
         run: |
           go test -race ./drivers/bitqiu
           go test -race ./internal/fs -run '^TestNAS'
-          go test -race ./server/handles -run '^Test(BitQiuNASIntegration|NASTaskInfo)$'
+          go test -race ./server/handles -run '^Test(Inventory|BitQiuNASIntegration|NASTaskInfo)'
           go test -race ./server/nasui
           node --test scripts/nas-ui.test.cjs scripts/nas-picker.test.cjs scripts/nas-size-filter.test.cjs
       - name: Download matching official frontend

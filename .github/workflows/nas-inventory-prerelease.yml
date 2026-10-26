@@ -1,7 +1,7 @@
 name: NAS inventory prerelease (offline artifacts only)
 on:
   push:
-    branches: [nas-management-inventory-review]
+    branches: [nas-management-name-match]
   workflow_dispatch:
 permissions:
   contents: write
@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   test-build-release:
-    if: github.ref == 'refs/heads/nas-management-inventory-review'
+    if: github.ref == 'refs/heads/nas-management-name-match'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -75,7 +75,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tag="nas-inventory-preview-${GITHUB_SHA::12}"
-          gh release create "$tag" prerelease/* --target "$GITHUB_SHA" --prerelease --latest=false --title "NAS inventory and size filter preview ${GITHUB_SHA::12}" --notes-file docs/NAS_INVENTORY_PRERELEASE.md
+          gh release create "$tag" prerelease/* --target "$GITHUB_SHA" --prerelease --latest=false --title "NAS name matching preview ${GITHUB_SHA::12}" --notes-file docs/NAS_INVENTORY_PRERELEASE.md
       - uses: actions/upload-artifact@v4
         if: always()
         with:

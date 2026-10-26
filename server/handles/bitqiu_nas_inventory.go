@@ -25,10 +25,11 @@ import (
 )
 
 type nasInventoryOptions struct {
-	Enabled        bool `json:"enabled"`
-	NASOnly        bool `json:"nas_only"`
-	CrossDirectory bool `json:"cross_directory"`
-	FullHash       bool `json:"full_hash"`
+	Enabled        bool   `json:"enabled"`
+	Matching       string `json:"matching,omitempty"`
+	NASOnly        bool   `json:"nas_only"`
+	CrossDirectory bool   `json:"cross_directory"`
+	FullHash       bool   `json:"full_hash"`
 }
 type nasInventoryObject struct {
 	Side      string            `json:"side,omitempty"`
@@ -48,6 +49,7 @@ type nasInventoryObject struct {
 type nasEvidenceCandidate struct {
 	Object  nasInventoryObject `json:"object"`
 	Reasons []string           `json:"reasons"`
+	Rank    int                `json:"rank"`
 }
 type nasReviewEvent struct {
 	Decision     string          `json:"decision"`
@@ -121,7 +123,7 @@ func inventorySame(a, b nasInventoryObject) bool {
 	return a.ObjectID == b.ObjectID && a.IsDir == b.IsDir && a.SizeKnown == b.SizeKnown && (!a.SizeKnown || a.Size == b.Size) && a.Modified.Equal(b.Modified) && inventoryDigest(a.Hashes) == inventoryDigest(b.Hashes)
 }
 func inventoryHashMatch(a, b nasInventoryObject) bool {
-	if !a.HashVerified || !b.HashVerified || a.IsDir || b.IsDir || a.SizeKnown && b.SizeKnown && a.Size != b.Size {
+	if !a.HashVerified || !b.HashVerified || a.IsDir || b.IsDir || inventoryHashConflict(a, b) || a.SizeKnown && b.SizeKnown && a.Size != b.Size {
 		return false
 	}
 	for alg, value := range a.Hashes {
@@ -131,60 +133,96 @@ func inventoryHashMatch(a, b nasInventoryObject) bool {
 	}
 	return false
 }
-func inventoryMatch(a nasInventoryObject, target map[string]nasInventoryObject, cross bool) (string, *nasInventoryObject, []nasEvidenceCandidate, []string) {
-	if b, ok := target[a.Path]; ok {
-		if a.IsDir != b.IsDir {
-			return "indeterminate", &b, nil, []string{"同路径类型冲突"}
-		}
-		if a.IsDir {
-			return "directory_present", &b, nil, []string{"相对路径与目录类型一致"}
-		}
-		if a.SizeKnown && b.SizeKnown && a.Size != b.Size {
-			return "size_difference", &b, nil, []string{"相对路径相同，已知大小不同"}
-		}
-		if inventoryHashMatch(a, b) {
-			return "content_verified", &b, nil, []string{"同算法完整哈希一致"}
-		}
-		if !a.SizeKnown || !b.SizeKnown {
-			return "indeterminate", &b, nil, []string{"同路径大小未知，不能按零处理"}
-		}
-		for alg, hash := range a.Hashes {
-			if a.HashVerified && b.HashVerified && b.Hashes[alg] != "" && b.Hashes[alg] != hash {
-				return "content_difference", &b, nil, []string{"同算法完整哈希不同"}
-			}
-		}
-		return "content_unverified", &b, nil, []string{"相对路径与已知大小一致，内容未校验"}
-	}
+
+// inventoryMatch searches the entire explicitly inventoried NAS scope. The legacy
+// cross flag is accepted for API/cache compatibility but never restricts names to
+// an assumed relative-path mapping.
+func inventoryMatch(a nasInventoryObject, target map[string]nasInventoryObject, _ bool) (string, *nasInventoryObject, []nasEvidenceCandidate, []string) {
+	return inventoryMatchPool(a, target)
+}
+
+func inventoryMatchPool(a nasInventoryObject, target map[string]nasInventoryObject) (string, *nasInventoryObject, []nasEvidenceCandidate, []string) {
 	candidates := []nasEvidenceCandidate{}
 	for _, b := range target {
-		if a.IsDir != b.IsDir || (!cross && path.Dir(a.Path) != path.Dir(b.Path)) {
+		if a.IsDir != b.IsDir || b.Path == "." {
 			continue
 		}
 		reasons := []string{}
+		score := 0
 		if inventoryHashMatch(a, b) {
 			reasons = append(reasons, "同算法完整哈希一致")
+			score += 1000
 		}
-		sameName := path.Base(a.Path) == path.Base(b.Path)
-		if sameName {
-			reasons = append(reasons, "同名")
+		if path.Base(a.Path) == path.Base(b.Path) {
+			reasons = append(reasons, "名称完全一致，内容尚需核对")
+			score += 100
+		} else if inventoryName(path.Base(a.Path)) == inventoryName(path.Base(b.Path)) {
+			reasons = append(reasons, "名称归一化一致，内容尚需核对")
+			score += 80
 		} else if compareSimilar(path.Base(a.Path), path.Base(b.Path)) {
 			reasons = append(reasons, "名称相似，不能证明内容相同")
+			score += 40
 		}
 		if len(reasons) == 0 {
 			continue
 		}
-		if a.SizeKnown && b.SizeKnown {
-			if a.Size == b.Size {
-				reasons = append(reasons, "已知大小一致")
+		if !a.IsDir {
+			if a.SizeKnown && b.SizeKnown {
+				if a.Size == b.Size {
+					reasons = append(reasons, "已知大小一致")
+					score += 200
+				} else {
+					reasons = append(reasons, "已知大小不同，候选冲突")
+					score -= 300
+				}
 			} else {
-				reasons = append(reasons, "已知大小不同")
+				reasons = append(reasons, "大小未知，不能视为零")
 			}
-		} else if !a.IsDir {
-			reasons = append(reasons, "大小未知")
+			if inventoryHashConflict(a, b) {
+				reasons = append(reasons, "同算法完整哈希不同，候选冲突")
+				score -= 2000
+			}
 		}
-		candidates = append(candidates, nasEvidenceCandidate{b, reasons})
+		if folder := inventorySharedFolder(a.Path, b.Path); folder != "" {
+			reasons = append(reasons, "所属文件夹名称一致："+folder+"（仅辅助证据）")
+			score += 20
+		}
+		candidates = append(candidates, nasEvidenceCandidate{Object: b, Reasons: reasons, Rank: score})
 	}
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Object.Path < candidates[j].Object.Path })
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].Rank != candidates[j].Rank {
+			return candidates[i].Rank > candidates[j].Rank
+		}
+		return candidates[i].Object.Path < candidates[j].Object.Path
+	})
+	// Record an existing destination as a write conflict, never as a shortcut
+	// that hides matching names in other directories.
+	var direct *nasInventoryObject
+	if b, ok := target[a.Path]; ok {
+		direct = &b
+		if a.IsDir != b.IsDir {
+			return "indeterminate", direct, candidates, []string{"下载目标同路径类型冲突；名称候选仍保留"}
+		}
+		if a.SizeKnown && b.SizeKnown && a.Size != b.Size {
+			return "size_difference", direct, candidates, []string{"下载目标同路径大小不同；其他目录名称候选仍保留"}
+		}
+		if inventoryHashConflict(a, b) {
+			return "content_difference", direct, candidates, []string{"同算法完整哈希不同；其他候选仍保留"}
+		}
+	}
+	if len(candidates) == 1 && candidates[0].Object.Path == a.Path {
+		b := candidates[0].Object
+		if a.IsDir {
+			return "directory_present", direct, candidates, []string{"目录名称一致；目录内容需逐项核对"}
+		}
+		if inventoryHashMatch(a, b) {
+			return "content_verified", direct, candidates, []string{"同算法完整哈希一致"}
+		}
+		if !a.SizeKnown || !b.SizeKnown {
+			return "indeterminate", direct, candidates, []string{"大小未知，不能确认内容一致"}
+		}
+		return "content_unverified", direct, candidates, []string{"名称与已知大小一致，内容未校验"}
+	}
 	if len(candidates) > 0 {
 		kind := "suspected_rename"
 		for _, c := range candidates {
@@ -193,9 +231,9 @@ func inventoryMatch(a nasInventoryObject, target map[string]nasInventoryObject, 
 				break
 			}
 		}
-		return kind, nil, candidates, []string{"仅为候选；多个候选保留歧义，须人工复核"}
+		return kind, direct, candidates, []string{"按名称在所选 NAS 全范围寻找候选，不要求路径对应；排序不等于确认，多个候选保留歧义"}
 	}
-	return "suspected_missing", nil, candidates, []string{"所选范围内未发现同路径或名称/哈希候选"}
+	return "suspected_missing", direct, candidates, []string{"所选 NAS 范围内未发现名称或可信哈希候选；不代表已确认缺失"}
 }
 
 type inventoryContextReader struct {
@@ -382,44 +420,37 @@ func scanNASInventory(ctx context.Context, j *nasScanJob, s *nasComparison, actu
 	sort.Slice(s.inventoryObjects, func(i, j int) bool {
 		return s.inventoryObjects[i].Side+s.inventoryObjects[i].Path < s.inventoryObjects[j].Side+s.inventoryObjects[j].Path
 	})
-	// Bound fuzzy matching work. Exhaustion fails safely and preserves the last
-	// complete result, rather than silently truncating ambiguous candidates.
+	// Index names and trusted hashes once; bound fuzzy comparisons and evidence.
+	index := newInventoryNameIndex(target)
 	work := 0
 	candidateCount := 0
+	usedTargets := map[string]bool{}
 	keys := make([]string, 0, len(source))
 	for rel := range source {
 		keys = append(keys, rel)
 	}
 	sort.Strings(keys)
 	for _, rel := range keys {
-		a := source[rel]
-		pool := target
-		if _, exists := target[rel]; !exists {
-			if !j.Options.CrossDirectory {
-				pool = map[string]nasInventoryObject{}
-				for p, v := range target {
-					if path.Dir(p) == path.Dir(rel) {
-						pool[p] = v
-					}
-				}
-			}
-			work += len(pool)
-			if work > 4000000 {
-				return errors.New("名称候选比较超过 400 万次，请缩小范围；旧完整结果已保留")
-			}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		kind, b, candidates, reasons := inventoryMatch(a, pool, j.Options.CrossDirectory)
+		a := source[rel]
+		pool, err := index.pool(a, &work)
+		if err != nil {
+			return err
+		}
+		kind, b, candidates, reasons := inventoryMatchPool(a, pool)
+		for _, c := range candidates {
+			usedTargets[c.Object.Path] = true
+		}
+		if b != nil {
+			usedTargets[b.Path] = true
+		}
 		candidateCount += len(candidates)
 		if candidateCount > 200000 {
 			return errors.New("候选证据超过 200000 条，请缩小范围；未截断候选")
 		}
-		blocked := false
-		for _, p := range s.issues {
-			if p.Relative == "" || rel == p.Relative || strings.HasPrefix(rel, p.Relative+"/") || a.IsDir && strings.HasPrefix(p.Relative, rel+"/") || j.Options.CrossDirectory && (kind == "suspected_missing" || kind == "suspected_move" || kind == "suspected_rename") {
-				blocked = true
-				break
-			}
-		}
+		blocked := len(s.issues) > 0 // Global name candidates require a complete scope.
 		if blocked {
 			kind = "indeterminate"
 			reasons = append(reasons, "相关分支扫描不完整，无法判断")
@@ -438,7 +469,7 @@ func scanNASInventory(ctx context.Context, j *nasScanJob, s *nasComparison, actu
 			if rel == "." {
 				continue
 			}
-			if _, ok := source[rel]; !ok {
+			if !usedTargets[rel] {
 				keys = append(keys, rel)
 			}
 		}
@@ -446,7 +477,7 @@ func scanNASInventory(ctx context.Context, j *nasScanJob, s *nasComparison, actu
 		for _, rel := range keys {
 			v := target[rel]
 			kind := "nas_only"
-			reasons := []string{"仅 NAS 盘点包含此路径"}
+			reasons := []string{"在本次所选来源中无名称或可信哈希候选；不代表其他网盘范围不存在"}
 			if len(s.issues) > 0 {
 				kind = "indeterminate"
 				reasons = []string{"来源存在未完成分支，无法判断是否 NAS 独有"}
@@ -525,8 +556,12 @@ func BitQiuNASInventoryReview(c *gin.Context) {
 	}
 	nasScanStore.Lock()
 	defer nasScanStore.Unlock()
-	_, r, err := inventoryResultLocked(user, req.ScanID)
+	j, r, err := inventoryResultLocked(user, req.ScanID)
 	if err != nil {
+		common.ErrorResp(c, err, 409)
+		return
+	}
+	if err := inventoryRequireNameMatching(j); err != nil {
 		common.ErrorResp(c, err, 409)
 		return
 	}
@@ -606,6 +641,9 @@ func inventoryPreflight(ctx context.Context, user *model.User, scanID string, v 
 	defer nasScanStore.Unlock()
 	j, r, err := inventoryResultLocked(user, scanID)
 	if err != nil {
+		return err
+	}
+	if err := inventoryRequireNameMatching(j); err != nil {
 		return err
 	}
 	if scanRunning(j.State) || j.State != "completed" {

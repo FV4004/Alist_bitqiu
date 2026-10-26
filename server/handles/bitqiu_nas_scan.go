@@ -194,6 +194,7 @@ func BitQiuNASScanStart(c *gin.Context) {
 		common.ErrorStrResp(c, "扫描参数不合法", 400)
 		return
 	}
+	normalizeInventoryOptions(&req.Options)
 	user := c.MustGet("user").(*model.User)
 	source, actual, virtual, err := nasSelectionSource(user, req.SrcDir)
 	if err != nil {
@@ -300,6 +301,7 @@ func BitQiuNASScanStatus(c *gin.Context) {
 		common.ErrorStrResp(c, "扫描查询参数不合法", 400)
 		return
 	}
+	normalizeInventoryOptions(&req.Options)
 	user := c.MustGet("user").(*model.User)
 	key := ""
 	if req.ID == "" && !req.Latest {
