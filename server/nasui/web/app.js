@@ -263,6 +263,8 @@
   $('history-clear-selected').onclick=run(()=>clearHistory('selected',state.history.flatMap(taskIDs).filter(id=>state.taskSelected.has(id))));
   $('tasks-refresh').onclick=run(loadTasks);
   const comparison={items:[],issues:[],selected:new Set(),tab:'files',limit:200,seq:0,running:false,controller:null,scanID:'',plan:null,finalLimit:200,busy:false};
+  let inventoryUI;
+  inventoryUI=window.NASInventory.create({api,state,run,bytes,headers:requestHeaders,base,prepare:async(scanID,ids)=>{comparison.scanID=scanID;comparison.selected=new Set(ids);await $('compare-prepare').onclick();}});
   function compareRows(){return comparison.items.filter(item=>item.category===comparison.tab);}
   function compareSelection(){const rows=compareRows().filter(x=>!x.blocked),marked=rows.filter(x=>comparison.selected.has(x.id)).length;$('compare-select-all').checked=rows.length>0&&marked===rows.length;$('compare-select-all').indeterminate=marked>0&&marked<rows.length;$('compare-select-all').disabled=!rows.length;$('compare-selected').textContent=`已选 ${comparison.selected.size} 项（文件夹及其文件将在清单中去重）`;$('compare-prepare').disabled=!comparison.selected.size||comparison.running||comparison.busy;}
   function renderComparison(){
@@ -281,6 +283,7 @@
   }
   function scanScopeUI(){
     const n=state.selected.size,shown=sourceVisible().filter(x=>state.selected.has(x.name)).length;
+    inventoryUI?.scope();
     $('scan-scope').textContent=`当前待扫描：左侧已选 ${n} 项${n>shown?'（筛选外 '+(n-shown)+' 项）':''}；文件夹包含其全部后代。开始后固定范围，后续勾选不影响后台任务。`;
     $('compare-start').disabled=!n||!state.target||state.loading||!state.sourceComplete||!!state.scanRunning;
   }
@@ -288,6 +291,7 @@
   let scanPollBusy=false;
   function showScanResult(result){
     if(!result)return;
+    if(result.options?.enabled){comparison.scanID=result.scan_id;comparison.items=result.items||[];$('compare-results').hidden=true;return;}
     if(result.scan_id===comparison.scanID)return;
     comparison.scanID=result.scan_id;comparison.items=result.items||[];comparison.issues=result.issues||[];comparison.selected.clear();comparison.tab='files';comparison.limit=200;
     $('compare-roots').textContent=`结果来源：${result.source} → NAS：${result.destination} · 范围：${(result.names||[]).join('、')}`;
@@ -295,6 +299,7 @@
     $('compare-results').hidden=false;renderComparison();
   }
   function showScan(data){
+    inventoryUI?.update(data);
     const job=data?.job;if(!job){state.scanRunning=false;comparison.jobID='';comparison.running=false;$('compare-progress').textContent='此范围暂无扫描记录';$('scan-history').textContent='暂无完整扫描结果缓存';$('scan-meter').hidden=true;$('scan-percent').textContent='';$('compare-cancel').disabled=true;comparison.scanID='';comparison.items=[];$('compare-results').hidden=true;scanScopeUI();return;}
     comparison.jobID=job.id;comparison.running=!!scanActive(job);state.scanRunning=comparison.running;$('compare-cancel').disabled=!comparison.running||job.state==='canceling';
     const meter=$('scan-meter');meter.hidden=!comparison.running&&job.state!=='completed';
@@ -315,13 +320,13 @@
   }
   async function scanComparison(){
     if(comparison.running)return;if(!state.sourceComplete||state.loading)throw Error('请等待当前目录加载完整后开始扫描。');if(!state.selected.size||!state.target)throw Error('请先在左侧勾选文件或文件夹，并选择 NAS 目录。');
-    const request={src_dir:state.source,dst_dir:state.target,names:[...state.selected]};
+    const request={src_dir:state.source,dst_dir:state.target,names:[...state.selected],options:inventoryUI.options()};
     $('compare-start').disabled=true;
     try{const data=await api('/admin/bitqiu/nas/scan/start',request);comparison.scanID='';comparison.resultTime='';comparison.selected.clear();comparison.items=[];$('compare-results').hidden=true;showScan(data);}finally{scanScopeUI();}
   }
   function renderFinalComparison(){const plan=comparison.plan;if(!plan)return;$('compare-final-list').replaceChildren();for(const task of plan.tasks.slice(0,comparison.finalLimit)){$('compare-final-list').append(el('p',`${task.relative} · ${task.is_dir?'创建文件夹':task.size>=0?bytes(task.size):'大小未知'}`));}$('compare-final-more').hidden=plan.tasks.length<=comparison.finalLimit;}
   $('compare-start').onclick=run(scanComparison);$('compare-cancel').onclick=run(async()=>{if(!comparison.jobID)return;showScan(await api('/admin/bitqiu/nas/scan/cancel',{job_id:comparison.jobID}));});
-  $('scan-restore').onclick=run(async()=>{if(comparison.running)throw Error('当前后台扫描尚未完成，请等待或取消后读取其他范围缓存。');if(!state.selected.size)throw Error('请先在左侧勾选需要读取缓存的范围。');const data=await api('/admin/bitqiu/nas/scan/status',{src_dir:state.source,dst_dir:state.target,names:[...state.selected]});comparison.scanID='';comparison.resultTime='';comparison.items=[];comparison.selected.clear();$('compare-results').hidden=true;showScan(data);});
+  $('scan-restore').onclick=run(async()=>{if(comparison.running)throw Error('当前后台扫描尚未完成，请等待或取消后读取其他范围缓存。');if(!state.selected.size)throw Error('请先在左侧勾选需要读取缓存的范围。');const data=await api('/admin/bitqiu/nas/scan/status',{src_dir:state.source,dst_dir:state.target,names:[...state.selected],options:inventoryUI.options()});comparison.scanID='';comparison.resultTime='';comparison.items=[];comparison.selected.clear();$('compare-results').hidden=true;showScan(data);});
   for(const kind of ['files','folders','review'])$('compare-tab-'+kind).onclick=()=>{comparison.tab=kind;comparison.limit=200;renderComparison();};
   $('compare-select-all').onchange=()=>{for(const item of compareRows()){if(item.blocked)continue;if($('compare-select-all').checked)comparison.selected.add(item.id);else comparison.selected.delete(item.id);}renderComparison();};
   $('compare-clear').onclick=()=>{comparison.selected.clear();renderComparison();};$('compare-more').onclick=()=>{comparison.limit+=200;renderComparison();};

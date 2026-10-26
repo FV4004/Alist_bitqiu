@@ -1,0 +1,82 @@
+name: NAS inventory prerelease (offline artifacts only)
+on:
+  push:
+    branches: [nas-management-inventory-review]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: nas-inventory-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test-build-release:
+    if: github.ref == 'refs/heads/nas-management-inventory-review'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Backend, security and original download regressions
+        run: |
+          go test -race ./drivers/bitqiu ./internal/task ./server/nasui
+          go test -race ./internal/fs -run '^TestNAS'
+          go test -race ./internal/op -run '^TestPendingLoginCanBeCreatedAndEdited$'
+          go test -race ./server/handles -run '^Test(Inventory|BitQiuNASIntegration|NASTaskInfo)'
+          node --test scripts/nas-ui.test.cjs scripts/nas-picker.test.cjs
+          node --check server/nasui/web/inventory.js
+      - name: Matching official frontend and browser dependencies
+        run: |
+          curl --fail --location --retry 3 https://github.com/AlistGo/alist-web/releases/download/3.65.0/dist.tar.gz -o /tmp/frontend.tar.gz
+          tar -xzf /tmp/frontend.tar.gz -C public
+          python -m pip install playwright==1.62.0
+          python -m playwright install --with-deps chromium webkit
+      - name: Chromium and WebKit acceptance, including original flows
+        run: |
+          python scripts/test-downloads-mount.py
+          python scripts/test-alist-login.py
+          python scripts/test-nas-browser.py
+          python scripts/test-nas-stream.py
+          python scripts/test-nas-auth.py
+          python scripts/test-nas-picker.py
+          python scripts/test-nas-compare.py
+          python scripts/test-nas-inventory.py
+      - name: Build supported linux amd64 static binary
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y musl-tools
+          bash scripts/build-bitqiu.sh
+      - name: Build and smoke test local image, without registry authentication
+        run: |
+          docker build --platform linux/amd64 -f Dockerfile.bitqiu --build-arg VCS_REF="$GITHUB_SHA" -t alist-bitqiu:inventory-${GITHUB_SHA::12} .
+          bash scripts/smoke-bitqiu.sh alist-bitqiu:inventory-${GITHUB_SHA::12}
+      - name: Package offline installers
+        run: |
+          mkdir -p prerelease
+          docker save alist-bitqiu:inventory-${GITHUB_SHA::12} | gzip > prerelease/alist-bitqiu-inventory-linux-amd64-image.tar.gz
+          tar -czf prerelease/alist-bitqiu-inventory-linux-amd64-binary.tar.gz -C build alist
+          cp docs/NAS_INVENTORY_PRERELEASE.md prerelease/INSTALL-ROLLBACK.md
+          printf '%s\n' "$GITHUB_SHA" > prerelease/COMMIT
+          (cd prerelease && sha256sum *.tar.gz INSTALL-ROLLBACK.md COMMIT > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: alist-bitqiu-inventory-linux-amd64
+          path: prerelease/*
+          retention-days: 30
+      - name: Publish GitHub prerelease, never update latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="nas-inventory-preview-${GITHUB_SHA::12}"
+          gh release create "$tag" prerelease/* --target "$GITHUB_SHA" --prerelease --latest=false --title "NAS inventory and review preview ${GITHUB_SHA::12}" --notes-file docs/NAS_INVENTORY_PRERELEASE.md
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nas-inventory-browser-evidence
+          path: /tmp/alist-nas-ui/
+          if-no-files-found: ignore

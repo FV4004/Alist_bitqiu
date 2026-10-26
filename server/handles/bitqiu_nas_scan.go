@@ -34,34 +34,38 @@ type nasScanResult struct {
 	ID                             string    `json:"id"`
 	CompletedAt                    time.Time `json:"completed_at"`
 	Root, Base, Mount, SourceMount string
-	Items                          []nasScanStoredItem `json:"items"`
-	Issues                         []nasCompareIssue   `json:"issues"`
+	Items                          []nasScanStoredItem  `json:"items"`
+	Issues                         []nasCompareIssue    `json:"issues"`
+	Inventory                      []nasInventoryObject `json:"inventory,omitempty"`
 }
 type nasScanJob struct {
-	ID          string         `json:"id"`
-	Key         string         `json:"-"`
-	Owner       uint           `json:"-"`
-	Source      string         `json:"source"`
-	Destination string         `json:"destination"`
-	Names       []string       `json:"names"`
-	State       string         `json:"state"`
-	Stage       string         `json:"stage"`
-	Discovered  int            `json:"discovered"`
-	Processed   int            `json:"processed"`
-	Total       int            `json:"total"`
-	Percent     int            `json:"percent"`
-	Current     string         `json:"current"`
-	StartedAt   time.Time      `json:"started_at"`
-	FinishedAt  *time.Time     `json:"finished_at"`
-	Message     string         `json:"message"`
-	Result      *nasScanResult `json:"-"`
+	Options     nasInventoryOptions `json:"options"`
+	Partial     *nasScanResult      `json:"-"`
+	ID          string              `json:"id"`
+	Key         string              `json:"-"`
+	Owner       uint                `json:"-"`
+	Source      string              `json:"source"`
+	Destination string              `json:"destination"`
+	Names       []string            `json:"names"`
+	State       string              `json:"state"`
+	Stage       string              `json:"stage"`
+	Discovered  int                 `json:"discovered"`
+	Processed   int                 `json:"processed"`
+	Total       int                 `json:"total"`
+	Percent     int                 `json:"percent"`
+	Current     string              `json:"current"`
+	StartedAt   time.Time           `json:"started_at"`
+	FinishedAt  *time.Time          `json:"finished_at"`
+	Message     string              `json:"message"`
+	Result      *nasScanResult      `json:"-"`
 	cancel      context.CancelFunc
 }
 type nasScanDiskJob struct {
-	Job    nasScanJob     `json:"job"`
-	Owner  uint           `json:"owner"`
-	Key    string         `json:"key"`
-	Result *nasScanResult `json:"result"`
+	Job     nasScanJob     `json:"job"`
+	Owner   uint           `json:"owner"`
+	Key     string         `json:"key"`
+	Result  *nasScanResult `json:"result"`
+	Partial *nasScanResult `json:"partial,omitempty"`
 }
 
 var nasScanStore = struct {
@@ -125,6 +129,7 @@ func loadNASScansLocked() error {
 		j.Key = r.Key
 		j.Owner = r.Owner
 		j.Result = r.Result
+		j.Partial = r.Partial
 		if scanRunning(j.State) {
 			j.State = "interrupted"
 			j.Message = "上次扫描因服务重启中断，以下为最近一次完整扫描缓存"
@@ -140,7 +145,7 @@ func loadNASScansLocked() error {
 func saveNASScansLocked() error {
 	records := make([]nasScanDiskJob, 0, len(nasScanStore.jobs))
 	for _, j := range nasScanStore.jobs {
-		records = append(records, nasScanDiskJob{Job: *j, Owner: j.Owner, Key: j.Key, Result: j.Result})
+		records = append(records, nasScanDiskJob{Job: *j, Owner: j.Owner, Key: j.Key, Result: j.Result, Partial: j.Partial})
 	}
 	raw, err := json.Marshal(records)
 	if err != nil {
@@ -162,20 +167,28 @@ func nasScanViewLocked(j *nasScanJob, includeResult bool) gin.H {
 	job := *j
 	job.Names = append([]string(nil), j.Names...)
 	view["job"] = &job
+	if j.Partial != nil {
+		items := []nasCompareItem{}
+		for _, v := range j.Partial.Items {
+			items = append(items, v.Item)
+		}
+		view["attempt"] = gin.H{"scan_id": j.Partial.ID, "items": items, "issues": j.Partial.Issues, "completed_at": j.Partial.CompletedAt, "source": j.Source, "destination": j.Destination, "names": j.Names, "inventory": j.Partial.Inventory, "options": j.Options}
+	}
 	if includeResult && j.Result != nil {
 		items := make([]nasCompareItem, 0, len(j.Result.Items))
 		for _, v := range j.Result.Items {
 			items = append(items, v.Item)
 		}
-		view["result"] = gin.H{"scan_id": j.Result.ID, "completed_at": j.Result.CompletedAt, "source": j.Source, "destination": j.Destination, "names": j.Names, "items": items, "issues": j.Result.Issues, "cached": j.Result.ID != j.ID}
+		view["result"] = gin.H{"scan_id": j.Result.ID, "completed_at": j.Result.CompletedAt, "source": j.Source, "destination": j.Destination, "names": j.Names, "items": items, "issues": j.Result.Issues, "cached": j.Result.ID != j.ID, "options": j.Options, "statistics": inventoryStatistics(j.Result.Inventory), "inventory": j.Result.Inventory}
 	}
 	return view
 }
 func BitQiuNASScanStart(c *gin.Context) {
 	var req struct {
-		SrcDir string   `json:"src_dir"`
-		DstDir string   `json:"dst_dir"`
-		Names  []string `json:"names"`
+		SrcDir  string              `json:"src_dir"`
+		DstDir  string              `json:"dst_dir"`
+		Names   []string            `json:"names"`
+		Options nasInventoryOptions `json:"options"`
 	}
 	if c.ShouldBindJSON(&req) != nil {
 		common.ErrorStrResp(c, "扫描参数不合法", 400)
@@ -196,6 +209,9 @@ func BitQiuNASScanStart(c *gin.Context) {
 	if err != nil {
 		common.ErrorResp(c, err, 400)
 		return
+	}
+	if req.Options.Enabled {
+		key = inventoryDigest([]any{key, req.Options})
 	}
 	root, rootPath, base, mount, err := compareTarget(destination)
 	if err != nil {
@@ -248,7 +264,7 @@ func BitQiuNASScanStart(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	copyUser := *user
 	copyUser.Role = append(model.Roles(nil), user.Role...)
-	job := &nasScanJob{ID: rand.Text(), Key: key, Owner: user.ID, Source: virtual, Destination: destination, Names: names, State: "enumerating", Stage: "enumerating", Percent: -1, StartedAt: time.Now(), cancel: cancel}
+	job := &nasScanJob{Options: req.Options, ID: rand.Text(), Key: key, Owner: user.ID, Source: virtual, Destination: destination, Names: names, State: "enumerating", Stage: "enumerating", Percent: -1, StartedAt: time.Now(), cancel: cancel}
 	if old != nil {
 		job.Result = old.Result
 	}
@@ -272,12 +288,13 @@ func BitQiuNASScanStart(c *gin.Context) {
 }
 func BitQiuNASScanStatus(c *gin.Context) {
 	var req struct {
-		ID          string   `json:"job_id"`
-		Latest      bool     `json:"latest"`
-		SrcDir      string   `json:"src_dir"`
-		DstDir      string   `json:"dst_dir"`
-		Names       []string `json:"names"`
-		KnownResult string   `json:"known_result"`
+		ID          string              `json:"job_id"`
+		Latest      bool                `json:"latest"`
+		SrcDir      string              `json:"src_dir"`
+		DstDir      string              `json:"dst_dir"`
+		Names       []string            `json:"names"`
+		KnownResult string              `json:"known_result"`
+		Options     nasInventoryOptions `json:"options"`
 	}
 	if c.ShouldBindJSON(&req) != nil {
 		common.ErrorStrResp(c, "扫描查询参数不合法", 400)
@@ -301,6 +318,9 @@ func BitQiuNASScanStatus(c *gin.Context) {
 			common.ErrorResp(c, err, 400)
 			return
 		}
+	}
+	if key != "" && req.Options.Enabled {
+		key = inventoryDigest([]any{key, req.Options})
 	}
 	nasScanStore.Lock()
 	defer nasScanStore.Unlock()
@@ -431,7 +451,13 @@ func enumerateNASScan(ctx context.Context, j *nasScanJob, s *nasComparison, actu
 	}
 	selected := []model.Obj{}
 	for _, name := range j.Names {
-		obj, err := op.Get(ctx, s.source, path.Join(actual, name))
+		var obj model.Obj
+		var err error
+		if j.Options.Enabled {
+			obj, err = inventoryFreshObject(ctx, s.source, path.Join(actual, name))
+		} else {
+			obj, err = op.Get(ctx, s.source, path.Join(actual, name))
+		}
 		if err != nil {
 			return 0, errors.New("所选来源已改变或无法读取，请刷新目录后重试")
 		}
@@ -493,7 +519,11 @@ func runNASScan(ctx context.Context, j *nasScanJob, s *nasComparison, actual str
 		finalErr = errors.New("NAS 存储挂载已改变，请重新扫描")
 		return
 	}
-	finalErr = scanNASComparison(ctx, s, actual, root, func(rel string, n int) error {
+	scan := func(emit func(string, int) error) error { return scanNASComparison(ctx, s, actual, root, emit) }
+	if j.Options.Enabled {
+		scan = func(emit func(string, int) error) error { return scanNASInventory(ctx, j, s, actual, root, emit) }
+	}
+	finalErr = scan(func(rel string, n int) error {
 		nasScanStore.Lock()
 		j.Current = rel
 		j.Processed = n
@@ -506,7 +536,7 @@ func runNASScan(ctx context.Context, j *nasScanJob, s *nasComparison, actual str
 	if finalErr != nil || ctx.Err() != nil {
 		return
 	}
-	result := &nasScanResult{ID: j.ID, CompletedAt: time.Now(), Root: s.root, Base: s.targetBase, Mount: s.targetMount, SourceMount: s.sourceMount, Items: []nasScanStoredItem{}, Issues: s.issues}
+	result := &nasScanResult{ID: j.ID, CompletedAt: time.Now(), Root: s.root, Base: s.targetBase, Mount: s.targetMount, SourceMount: s.sourceMount, Items: []nasScanStoredItem{}, Issues: s.issues, Inventory: s.inventoryObjects}
 	for _, v := range s.items {
 		result.Items = append(result.Items, nasScanStoredItem{v, v.src, v.ObjectID})
 	}
@@ -523,6 +553,7 @@ func runNASScan(ctx context.Context, j *nasScanJob, s *nasComparison, actual str
 		return
 	}
 	oldResult := j.Result
+	carryInventoryReviews(result, oldResult)
 	j.Result = result
 	j.State = "completed"
 	j.Stage = "completed"
@@ -532,7 +563,9 @@ func runNASScan(ctx context.Context, j *nasScanJob, s *nasComparison, actual str
 		j.State = "partial"
 		j.Message = "本次扫描存在未完成分支，以下为最近一次完整扫描缓存"
 		j.Result = oldResult
+		j.Partial = result
 	} else {
+		j.Partial = nil
 		j.Percent = 100
 		j.Processed = total
 	}

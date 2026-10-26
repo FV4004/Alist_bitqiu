@@ -144,6 +144,8 @@ func admin(g *gin.RouterGroup) {
 	nas.POST("/scan/start", handles.BitQiuNASScanStart)
 	nas.POST("/scan/status", handles.BitQiuNASScanStatus)
 	nas.POST("/scan/cancel", handles.BitQiuNASScanCancel)
+	nas.POST("/scan/review", handles.BitQiuNASInventoryReview)
+	nas.POST("/scan/export", handles.BitQiuNASInventoryExport)
 	nas.POST("/scan/prepare", handles.BitQiuNASComparePrepare)
 	nas.POST("/scan/commit", handles.BitQiuNASCompareCommit)
 	nas.POST("/compare", handles.BitQiuNASCompare)

@@ -28,14 +28,15 @@ const compareLimit = 50000
 var compareSlots = make(chan struct{}, 2)
 
 type nasCompareItem struct {
-	ID         string   `json:"id"`
-	Relative   string   `json:"relative"`
-	IsDir      bool     `json:"is_dir"`
-	Category   string   `json:"category"`
-	Size       int64    `json:"size"`
-	Candidates []string `json:"candidates,omitempty"`
-	Blocked    bool     `json:"blocked"`
-	ObjectID   string   `json:"-"`
+	Detail     *nasInventoryDetail `json:"detail,omitempty"`
+	ID         string              `json:"id"`
+	Relative   string              `json:"relative"`
+	IsDir      bool                `json:"is_dir"`
+	Category   string              `json:"category"`
+	Size       int64               `json:"size"`
+	Candidates []string            `json:"candidates,omitempty"`
+	Blocked    bool                `json:"blocked"`
+	ObjectID   string              `json:"-"`
 	obj        model.Obj
 	src        string
 }
@@ -44,6 +45,7 @@ type nasCompareIssue struct {
 	Message  string `json:"message"`
 }
 type nasComparison struct {
+	inventoryObjects                                          []nasInventoryObject
 	owner                                                     uint
 	user                                                      *model.User
 	expires                                                   time.Time
@@ -56,11 +58,13 @@ type nasComparison struct {
 	inventoryErrors                                           map[string]bool
 }
 type nasComparePlan struct {
-	mu      sync.Mutex
-	owner   uint
-	expires time.Time
-	records []fs.NASRecord
-	used    bool
+	mu       sync.Mutex
+	owner    uint
+	expires  time.Time
+	records  []fs.NASRecord
+	used     bool
+	scanID   string
+	evidence map[string]nasCompareItem
 }
 
 var nasComparisons = struct {
@@ -529,8 +533,18 @@ func BitQiuNASComparePrepare(c *gin.Context) {
 				}
 			}
 		}
+		if v.Detail != nil {
+			// New inventory selections never expand a directory implicitly.
+			include = direct
+		}
 		if !include {
 			continue
+		}
+		if v.Detail != nil {
+			if e := inventoryPreflight(c.Request.Context(), user, req.ScanID, v); e != nil {
+				skipped = append(skipped, nasCompareSkip{v.Relative, e.Error()})
+				continue
+			}
 		}
 		if v.Blocked {
 			skipped = append(skipped, nasCompareSkip{v.Relative, "目录扫描不完整"})
@@ -547,7 +561,7 @@ func BitQiuNASComparePrepare(c *gin.Context) {
 			continue
 		}
 		obj, e := op.Get(c.Request.Context(), source, v.src)
-		if e != nil || obj.IsDir() != v.IsDir || (v.ObjectID != "" && obj.GetID() != v.ObjectID) {
+		if e != nil || obj.IsDir() != v.IsDir || (v.ObjectID != "" && obj.GetID() != v.ObjectID) || (v.Detail != nil && !inventorySame(*v.Detail.Source, inventorySource(obj, v.Relative, v.Detail.Source.HashVerified))) {
 			skipped = append(skipped, nasCompareSkip{v.Relative, "来源已改变，请重新扫描"})
 			continue
 		}
@@ -618,7 +632,13 @@ func BitQiuNASComparePrepare(c *gin.Context) {
 			}
 		}
 	}
-	plan := &nasComparePlan{owner: user.ID, expires: time.Now().Add(15 * time.Minute), records: records}
+	evidence := map[string]nasCompareItem{}
+	for _, v := range s.items {
+		if v.Detail != nil {
+			evidence[path.Join(s.sourceVirtual, v.Relative)] = v
+		}
+	}
+	plan := &nasComparePlan{owner: user.ID, expires: time.Now().Add(15 * time.Minute), records: records, scanID: req.ScanID, evidence: evidence}
 	id := rand.Text()
 	nasComparisons.Lock()
 	cleanComparisons()
@@ -662,6 +682,12 @@ func BitQiuNASCompareCommit(c *gin.Context) {
 	skipped := []nasCompareSkip{}
 	occupied := compareOccupied()
 	for _, r := range plan.records {
+		if v, ok := plan.evidence[r.Source]; ok {
+			if err := inventoryPreflight(c.Request.Context(), user, plan.scanID, v); err != nil {
+				skipped = append(skipped, nasCompareSkip{r.Destination, err.Error()})
+				continue
+			}
+		}
 		if !common.CanReadPathByRole(user, r.Source) || !common.CanReadPathByRole(user, r.Destination) {
 			common.ErrorStrResp(c, "路径权限已变化，请重新扫描", 403)
 			return
