@@ -1,4 +1,5 @@
 """Browser acceptance tests using deterministic APIs; real transfers are tested in Go."""
+from nas_browser_helpers import UNRESTRICTED_SIZE
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
 import json
@@ -12,6 +13,7 @@ with sync_playwright() as p:
  for prefix in ['', '/alist']:
   context=browser.new_context(viewport={'width':1440,'height':1000})
   context.add_init_script("localStorage.setItem('token','fixture-token');localStorage.setItem('alist_client_id','fixture-device')")
+  context.add_init_script(UNRESTRICTED_SIZE)
   requests=[];errors=[];controls=[];cfg={"limit":5,"order":1,"fail_next":False,"duplicate":False,"control_failure":False}
   tasks=[{'id':id,'name':name,'state':state,'progress':25,'total_bytes':104857600,'transferred_bytes':26214400,'speed_bytes_per_second':2097152,'start_time':'2026-01-02T00:00:00Z','restart_required':id=='restart','start_order':1 if id=='active1' else 0} for id,name,state in [('active1','下载 fixture','downloading'),('paused1','暂停 fixture','paused'),('waiting1','等待 fixture','waiting'),('restart','不支持续传 fixture','paused')]]
   tasks.extend({'id':'done'+str(i),'name':'历史 fixture '+str(i),'state':s,'completion_reason':reason,'progress':100 if s=='completed' else 30,'total_bytes':1024,'end_time':f'2026-01-01T00:00:0{i}Z','error':'context deadline exceeded' if reason=='timeout' else ''} for i,(s,reason) in enumerate([('completed','completed'),('canceled','user_canceled'),('failed','timeout'),('failed','failed')]))

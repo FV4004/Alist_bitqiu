@@ -1,4 +1,5 @@
 """One-way NAS compare review, explicit dedup confirmation and shared sorting."""
+from nas_browser_helpers import UNRESTRICTED_SIZE
 from pathlib import Path
 from urllib.parse import urlparse
 import json
@@ -11,6 +12,7 @@ with sync_playwright() as p:
   for prefix in ['', '/alist']:
    context=browser.new_context(viewport={'width':390,'height':844},is_mobile=True,has_touch=True)
    context.add_init_script("localStorage.setItem('token','fixture-token');localStorage.setItem('alist_client_id','fixture-device')")
+   context.add_init_script(UNRESTRICTED_SIZE)
    page=context.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
    cfg={'mode':'done','plans':0,'job':None,'result':None,'polls':0};calls=[]
    source=[{'name':'z.txt','is_dir':False,'size':1,'size_known':True,'modified':'2026-01-01T00:00:00Z'},{'name':'a.txt','is_dir':False,'size':500,'size_known':True,'modified':'2026-01-03T00:00:00Z'},{'name':'folder','is_dir':True,'modified':'2026-01-02T00:00:00Z'}]
