@@ -20,9 +20,9 @@ jobs:
         run: |
           go test -race ./drivers/bitqiu
           go test -race ./internal/fs -run '^TestNAS'
-          go test -race ./server/handles -run '^Test(BitQiuNASIntegration|NASTaskInfo)$'
+          go test -race ./server/handles -run '^Test(Inventory|BitQiuNASIntegration|NASTaskInfo)'
           go test -race ./server/nasui
-          node --test scripts/nas-ui.test.cjs scripts/nas-picker.test.cjs
+          node --test scripts/nas-ui.test.cjs scripts/nas-picker.test.cjs scripts/nas-size-filter.test.cjs
       - name: Download matching official frontend
         run: |
           curl --fail --location --retry 3 https://github.com/AlistGo/alist-web/releases/download/3.65.0/dist.tar.gz -o /tmp/frontend.tar.gz
@@ -42,6 +42,7 @@ jobs:
           python scripts/test-nas-auth.py || browser_test_status=1
           python scripts/test-nas-picker.py || browser_test_status=1
           python scripts/test-nas-compare.py || browser_test_status=1
+          python scripts/test-nas-size-filter.py || browser_test_status=1
           exit "$browser_test_status"
       - uses: actions/upload-artifact@v4
         if: always()

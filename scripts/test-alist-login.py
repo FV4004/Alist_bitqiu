@@ -8,6 +8,7 @@ import argparse
 import asyncio
 import json
 import os
+from nas_browser_helpers import UNRESTRICTED_SIZE
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -87,6 +88,7 @@ async def check(browser, prefix, unavailable=False, blocking=False):
 async def check_nas_navigation(browser, prefix):
     context = await browser.new_context()
     await context.add_init_script("localStorage.setItem('token', 'fixture-token');localStorage.setItem('alist_client_id','fixture-device')")
+    await context.add_init_script(UNRESTRICTED_SIZE)
     page = await context.new_page()
     errors, listed, documents = [], [], []
     page.on('console', lambda message: errors.append(message.text) if message.type == 'error' and message.text.startswith('error ') else None)

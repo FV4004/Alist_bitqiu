@@ -1,5 +1,6 @@
 """Real HTTP streaming proves first paint before completion; fixture data only."""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from nas_browser_helpers import UNRESTRICTED_SIZE
 from pathlib import Path
 from threading import Thread, Event
 import json
@@ -41,6 +42,7 @@ for prefix in ['', '/alist']:
  with sync_playwright() as p:
   browser=p.chromium.launch(executable_path=os.environ.get('CHROMIUM_PATH') or ('/usr/bin/chromium' if Path('/usr/bin/chromium').exists() else None),headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
   page=browser.new_page();page.add_init_script("localStorage.setItem('token','fixture-token');localStorage.setItem('alist_client_id','fixture-device')");errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+  page.add_init_script(UNRESTRICTED_SIZE)
   page.goto(f'http://127.0.0.1:{server.server_port}'+prefix+'/@nas')
   try:expect(page.locator('#source-files input')).to_have_count(2)
   except Exception:

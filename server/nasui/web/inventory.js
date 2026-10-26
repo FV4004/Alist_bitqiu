@@ -3,11 +3,11 @@
   "use strict";
   const labels = {
     suspected_missing: "疑似缺失",
-    suspected_move: "疑似移动",
-    suspected_rename: "疑似改名",
+    suspected_move: "异目录名称/哈希候选",
+    suspected_rename: "近似名称/哈希候选",
     size_difference: "同路径大小差异",
     content_difference: "内容差异",
-    nas_only: "NAS 独有",
+    nas_only: "NAS 未关联项目",
     indeterminate: "无法判断",
     content_unverified: "路径和大小一致，内容未校验",
     content_verified: "完整哈希一致",
@@ -72,8 +72,9 @@
       }
       const options = {
         enabled: true,
+        matching: "name-v1",
         nas_only: true,
-        cross_directory: false,
+        cross_directory: true,
         full_hash: false,
       };
       const query = {
@@ -85,8 +86,7 @@
       };
       const form = node("div");
       for (const [key, title] of [
-        ["nas_only", "列出 NAS 独有项目"],
-        ["cross_directory", "在所选范围内跨目录寻找候选"],
+        ["nas_only", "列出 NAS 未关联项目"],
         ["full_hash", "计算 NAS 完整 MD5 / SHA-256（可能耗时）"],
       ]) {
         const label = node("label", undefined, "check"),
@@ -236,7 +236,12 @@
         content.append(bar);
       }
       function reviewAllowed(v) {
-        return complete && !jobRunning() && !!v.detail;
+        return (
+          complete &&
+          result?.options?.matching === "name-v1" &&
+          !jobRunning() &&
+          !!v.detail
+        );
       }
       function jobRunning() {
         return ["enumerating", "checking", "canceling"].includes(job?.state);
@@ -244,6 +249,7 @@
       function downloadAllowed(v) {
         return (
           complete &&
+          result?.options?.matching === "name-v1" &&
           job?.state === "completed" &&
           !v.blocked &&
           decision(v) === "missing" &&
@@ -476,7 +482,7 @@
         content.append(node("p", status, "hint"));
         if (tab === "scope") {
           content.append(
-            node("h3", "来源与 NAS 按相对路径映射"),
+            node("h3", "来源与 NAS 按名称匹配，目录层级可以不同"),
             node(
               "p",
               `当前选择：${state.source || "请选择来源目录"} → ${state.target || "请选择 NAS 目录"}；${[...state.selected].join("、") || "请在左侧勾选文件或文件夹"}`,
@@ -484,7 +490,7 @@
             form,
             node(
               "p",
-              "来源后代保留相对路径；NAS 盘点右侧所选目录的全部后代，包含所选文件的同级候选。跨目录匹配不越过此 NAS 根目录。NAS 通过容器挂载的本地存储访问。",
+              "在右侧所选 NAS 目录的全部后代中查找同名或近似名称，文件夹名称用于辅助排序，不要求两端路径对应。多个候选全部保留，名称一致不代表内容一致。相对路径仅用于展示和补缺下载目标；补缺不会覆盖已有文件。",
               "hint",
             ),
           );
@@ -513,7 +519,7 @@
         content.append(
           node(
             "p",
-            `本结果选项：NAS 独有 ${result.options?.nas_only ? "开启" : "关闭"} · 跨目录 ${result.options?.cross_directory ? "开启" : "关闭"} · NAS 完整哈希 ${result.options?.full_hash ? "开启" : "关闭"}`,
+            `本结果选项：NAS 未关联 ${result.options?.nas_only ? "开启" : "关闭"} · 匹配 ${result.options?.matching === "name-v1" ? "所选范围全局名称匹配" : "旧版规则，请重新盘点"} · NAS 完整哈希 ${result.options?.full_hash ? "开启" : "关闭"}`,
             "hint",
           ),
         );
