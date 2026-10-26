@@ -70,11 +70,10 @@ type inventoryNameIndex struct {
 }
 
 func inventoryTypeKey(v nasInventoryObject) string { return strconv.FormatBool(v.IsDir) + ":" }
-func inventoryFuzzyKey(v nasInventoryObject, length int) string {
-	name := compareFold(path.Base(v.Path))
+func inventoryDigits(name string) string {
 	var digits strings.Builder
 	in := false
-	for _, r := range name {
+	for _, r := range compareFold(name) {
 		if r >= '0' && r <= '9' {
 			digits.WriteRune(r)
 			in = true
@@ -83,8 +82,18 @@ func inventoryFuzzyKey(v nasInventoryObject, length int) string {
 			in = false
 		}
 	}
-	return inventoryTypeKey(v) + path.Ext(name) + ":" + digits.String() + ":" + strconv.Itoa(length)
+	return digits.String()
 }
+func inventoryNormalizedNameMatch(a, b nasInventoryObject) bool {
+	x, y := path.Base(a.Path), path.Base(b.Path)
+	return inventoryName(x) == inventoryName(y) && inventoryDigits(x) == inventoryDigits(y) &&
+		(a.IsDir || compareFold(path.Ext(x)) == compareFold(path.Ext(y)))
+}
+func inventoryFuzzyKey(v nasInventoryObject, length int) string {
+	name := compareFold(path.Base(v.Path))
+	return inventoryTypeKey(v) + path.Ext(name) + ":" + inventoryDigits(name) + ":" + strconv.Itoa(length)
+}
+
 func newInventoryNameIndex(target map[string]nasInventoryObject) *inventoryNameIndex {
 	idx := &inventoryNameIndex{target: target, names: map[string][]string{}, fuzzy: map[string][]string{}, hashes: map[string][]string{}}
 	for p, v := range target {

@@ -119,3 +119,19 @@ func TestInventoryNameMatchingVersionIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestInventoryNameNormalizationKeepsEpisodeAndExtension(t *testing.T) {
+	a := nasInventoryObject{Path: "cloud/S01E02.mkv"}
+	for _, name := range []string{"S0_1E02.mkv", "S01E02mkv", "S01E02.mp4"} {
+		b := nasInventoryObject{Path: "nas/" + name}
+		_, _, candidates, _ := inventoryMatch(a, map[string]nasInventoryObject{b.Path: b}, true)
+		if len(candidates) != 0 {
+			t.Fatalf("normalization erased meaningful boundary: %s", name)
+		}
+	}
+	b := nasInventoryObject{Path: "nas/Ｓ０１ Ｅ０２.MKV"}
+	_, _, candidates, _ := inventoryMatch(a, map[string]nasInventoryObject{b.Path: b}, true)
+	if len(candidates) != 1 {
+		t.Fatal("cosmetic Unicode/space/case normalization lost")
+	}
+}

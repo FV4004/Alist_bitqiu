@@ -156,7 +156,7 @@ func inventoryMatchPool(a nasInventoryObject, target map[string]nasInventoryObje
 		if path.Base(a.Path) == path.Base(b.Path) {
 			reasons = append(reasons, "名称完全一致，内容尚需核对")
 			score += 100
-		} else if inventoryName(path.Base(a.Path)) == inventoryName(path.Base(b.Path)) {
+		} else if inventoryNormalizedNameMatch(a, b) {
 			reasons = append(reasons, "名称归一化一致，内容尚需核对")
 			score += 80
 		} else if compareSimilar(path.Base(a.Path), path.Base(b.Path)) {
