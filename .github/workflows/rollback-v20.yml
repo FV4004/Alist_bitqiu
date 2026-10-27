@@ -47,7 +47,7 @@ jobs:
         run: |
           gh api --method PATCH repos/FV4004/Alist_bitqiu/releases/418126233 -F draft=true -f make_latest=false --silent
           gh api --method PATCH repos/FV4004/Alist_bitqiu/releases/424114740 -F draft=true -f make_latest=false --silent
-          gh release edit build-f621fc5b0e86 --latest
+          gh release edit build-f621fc5b0e86 --repo FV4004/Alist_bitqiu --latest
       - uses: actions/checkout@v4
       - name: Remove withdrawn registry tags
         env:
