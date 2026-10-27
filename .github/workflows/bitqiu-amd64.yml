@@ -1,7 +1,7 @@
 name: Build and publish BitQiu amd64
 on:
   push:
-    branches: [main]
+    branches: [production-build-disabled]
     tags: ['v*-bitqiu.*']
   workflow_dispatch:
 permissions:
@@ -12,8 +12,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   build:
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/production-build-disabled'
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -99,7 +99,7 @@ jobs:
           path: release/*
           retention-days: 30
       - name: Publish downloadable GitHub Release
-        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+        if: github.ref == 'refs/heads/production-build-disabled' || startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
