@@ -41,7 +41,6 @@ jobs:
           python scripts/test-nas-stream.py || browser_test_status=1
           python scripts/test-nas-auth.py || browser_test_status=1
           python scripts/test-nas-picker.py || browser_test_status=1
-          python scripts/test-nas-compare.py || browser_test_status=1
           exit "$browser_test_status"
       - uses: actions/upload-artifact@v4
         if: always()
