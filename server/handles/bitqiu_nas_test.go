@@ -618,8 +618,4 @@ func TestBitQiuNASIntegration(t *testing.T) {
 			t.Fatal("replaced conflicting mount")
 		}
 	})
-	t.Run("one-way compare preview confirm and no overwrite", func(t *testing.T) { testNASCompare(t, source, dest, outside, invoke) })
-	t.Run("inventory review evidence and download consent", func(t *testing.T) { testNASInventoryWorkflow(t, source, dest, invoke) })
-	t.Run("background scan persistence and selected scope", func(t *testing.T) { testNASBackgroundScan(t, source, dest, invoke) })
-
 }

@@ -25,7 +25,6 @@ with sync_playwright() as p:
      elif path=='/api/me':data={'code':200,'data':{'role':[2]}}
      elif path.endswith('/targets'):data={'code':200,'data':{'cloud':[{'path':'/cloud','label':'cloud'}],'targets':[{'path':'/NAS','label':'NAS'}],'downloads_enabled':True}}
      elif path.endswith('/entries'):data={'code':200,'data':[]}
-     elif path.endswith('/scan/status'):data={'code':200,'data':{'job':None,'result':None}}
      elif path.endswith('/tasks'):data={'code':200,'data':{'active':[],'history':[]}}
      elif path.endswith('/list-stream'):
       r.fulfill(content_type='application/x-ndjson',body='{"event":"start"}\n{"event":"done","total":0}\n');return

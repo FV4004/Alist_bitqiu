@@ -1,7 +1,7 @@
 name: Roll back v20 release to v19
 on:
   push:
-    branches: [release-rollback-v20]
+    branches: [nas-management-production-rollback]
 permissions:
   contents: write
   packages: write
@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   rollback:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Authenticate registries
@@ -41,11 +41,20 @@ jobs:
           cmp original-manifest.json ghcr-latest-manifest.json
           cmp original-manifest.json dockerhub-latest-manifest.json
           echo 'VERIFIED: both latest tags match the original v19 manifest.'
-      - name: Withdraw v20 GitHub Release
+      - name: Withdraw superseded releases
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh api --method PATCH repos/FV4004/Alist_bitqiu/releases/418062314 -F draft=true -f make_latest=false --silent
+          gh api --method PATCH repos/FV4004/Alist_bitqiu/releases/418126233 -F draft=true -f make_latest=false --silent
+          gh api --method PATCH repos/FV4004/Alist_bitqiu/releases/424114740 -F draft=true -f make_latest=false --silent
+          gh release edit build-f621fc5b0e86 --latest
+      - uses: actions/checkout@v4
+      - name: Remove withdrawn registry tags
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: python3 scripts/withdraw-registry-tags.py
       - uses: actions/upload-artifact@v4
         with:
           name: rollback-v19-verification

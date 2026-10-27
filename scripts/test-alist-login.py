@@ -126,8 +126,6 @@ async def check_nas_navigation(browser, prefix):
                 await request.fulfill(content_type='application/x-ndjson',body=''.join(json.dumps(frame)+'\n' for frame in frames));return
             elif path == '/api/admin/bitqiu/nas/entries':
                 response['data']=[]
-            elif path == '/api/admin/bitqiu/nas/scan/status':
-                response['data'] = {'job':None,'result':None}
             elif path == '/api/admin/bitqiu/nas/tasks':
                 response['data'] = {'active': [], 'history': []}
             elif path == '/api/admin/bitqiu/nas/prepare':

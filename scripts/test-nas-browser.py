@@ -40,7 +40,6 @@ with sync_playwright() as p:
     elif endpoint=='/admin/bitqiu/nas/commit':requests.append(body);data={'tasks':[{'id':'fixture-task'}]}
     elif endpoint=='/admin/bitqiu/nas/history/clear':
      requests.append(body);assert body['confirmed'];selected=set(body['ids']);removed=[t for t in tasks if t['state'] in ['completed','failed','canceled'] and (body['scope']=='all' or t['id'] in selected or t.get('group_id') in selected)];tasks[:]=[t for t in tasks if t not in removed];data={'deleted':len(removed),'skipped':0,'partial_failures':0}
-    elif endpoint=='/admin/bitqiu/nas/scan/status':data={'job':None,'result':None}
     elif endpoint=='/admin/bitqiu/nas/tasks':data={'active':[caps(t) for t in tasks if t['state'] not in ['completed','canceled','failed']],'history':[caps(t) for t in tasks if t['state'] in ['completed','canceled','failed']],'concurrency':{'limit':cfg['limit'],'maximum':5,'running':sum(t['state']=='downloading' for t in tasks)}}
     elif endpoint=='/admin/bitqiu/nas/concurrency':
      if cfg['fail_next']:
@@ -197,7 +196,6 @@ with sync_playwright() as p:
   page.locator('#history-next').click();page.locator('#history-next').click();expect(page.locator('#history-tasks .task')).to_have_count(9)
   expect(page.locator('#history-next')).to_be_disabled()
   request_count=len([r for r in requests if 'refresh' in r])
-  page.locator('#folders-first').uncheck()
   for sort,name in [('name:asc','file-000.txt'),('modified:asc','file-000.txt'),('size:desc','file-236.txt')]:
    page.locator('#sort-order').select_option(sort);expect(page.locator('#source-files tr').first.locator('.file-heading')).to_contain_text(name)
   assert len([r for r in requests if 'refresh' in r])==request_count
