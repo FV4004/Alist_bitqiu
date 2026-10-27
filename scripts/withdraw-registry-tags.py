@@ -11,16 +11,10 @@ def request(url, method="GET", data=None, token=None):
         if method=="DELETE" and e.code==404:return None
         raise RuntimeError("Registry operation failed: HTTP "+str(e.code)) from None
 
-user=os.environ["DOCKERHUB_USERNAME"]
-login=request("https://hub.docker.com/v2/users/login/","POST",{"username":user,"password":os.environ["DOCKERHUB_TOKEN"]})
-errors=[]
+# Docker Hub deletion is assigned to the repository owner (existing token
+# returned 403). Do not retry denied operations or claim those tags removed.
 for tag in ["sha-327411b3acf4","sha-854527d0c2dd"]:
-    try:
-        request("https://hub.docker.com/v2/repositories/"+user+"/alist_bitqiu/tags/"+tag+"/","DELETE",token=login["token"])
-        print("Docker Hub tag withdrawn:",tag)
-    except RuntimeError as e:
-        errors.append("Docker Hub "+tag+": "+str(e))
-        print("BLOCKED:",errors[-1])
+    print("MANUAL Docker Hub deletion required:",tag)
 # Delete only versions carrying withdrawn tags, never the restored latest.
 base="https://api.github.com/users/FV4004/packages/container/alist_bitqiu/versions"
 versions=request(base+"?per_page=100",token=os.environ["GH_TOKEN"])
@@ -31,4 +25,3 @@ for v in versions:
         request(base+"/"+str(v["id"]),"DELETE",token=os.environ["GH_TOKEN"])
         print("GHCR withdrawn version deleted:",v["id"])
 
-if errors:raise RuntimeError("; ".join(errors))

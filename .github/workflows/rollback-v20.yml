@@ -49,7 +49,7 @@ jobs:
           gh api --method PATCH repos/FV4004/Alist_bitqiu/releases/424114740 -F draft=true -f make_latest=false --silent
           gh release edit build-f621fc5b0e86 --repo FV4004/Alist_bitqiu --latest
       - uses: actions/checkout@v4
-      - name: Remove withdrawn registry tags
+      - name: Remove GHCR versions (Docker Hub tags are owner-managed)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
