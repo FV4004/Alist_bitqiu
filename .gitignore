@@ -22,6 +22,7 @@ output/
 # vendor/
 /bin/*
 *.json
+!docs/BITQIU_CLOUD_DOWNLOAD_EVIDENCE.json
 /build
 /data/
 /tmp/
