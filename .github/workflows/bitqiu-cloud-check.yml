@@ -1,0 +1,41 @@
+name: Check BitQiu cloud download (no publish)
+on:
+  push:
+    branches: [bitqiu-cloud-download]
+  pull_request:
+    branches: [main]
+    paths:
+      - drivers/bitqiu/**
+      - internal/offline_download/**
+      - server/handles/offline_download.go
+      - docs/BITQIU_CLOUD_DOWNLOAD.md
+      - .github/workflows/bitqiu-cloud-check.yml
+permissions:
+  contents: read
+concurrency:
+  group: bitqiu-cloud-check-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GOAMD64: v1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check protocol, cloud framework and existing NAS behavior
+        run: |
+          check_status=0
+          go test -race ./drivers/bitqiu || check_status=1
+          go test -race ./internal/offline_download/... || check_status=1
+          go test -race ./internal/task || check_status=1
+          go test -race ./server/handles -run '^Test(BitQiuNASIntegration|NASTaskInfo)$' || check_status=1
+          go test -race ./internal/fs -run '^TestNAS' || check_status=1
+          node --test scripts/nas-ui.test.cjs scripts/nas-picker.test.cjs || check_status=1
+          exit "$check_status"
+      - name: Verify amd64 application compiles
+        run: go build -trimpath -tags=jsoniter -o /tmp/alist-bitqiu-cloud-check .
